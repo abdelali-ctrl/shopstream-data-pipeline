@@ -145,9 +145,6 @@ shopstream/
 │   │   └── shopstream_pipeline_dag.py  # Daily ETL pipeline DAG
 │   └── airflow.cfg
 │
-├── 📊 powerbi/                         # Business Intelligence
-│   └── ShopStream_Dashboard.pbix
-│
 ├── 📁 docs/                            # Documentation
 │   └── dashboard_preview.md            # Dashboard screenshots guide
 │
