@@ -239,10 +239,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 👨‍💻 Author
 
-**Abdelali** - Data Engineering Student @ UEMF
+**Abdelali** - Data Analyst Engineering Student
 
 ---
-
-<p align="center">
-  <i>Built with ❤️ as part of the Cloud Data Engineering curriculum</i>
-</p>
