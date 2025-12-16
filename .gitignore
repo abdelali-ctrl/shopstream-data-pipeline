@@ -1,0 +1,94 @@
+# ================================
+# ShopStream - .gitignore
+# ================================
+
+# ----------------
+# Environment & Secrets
+# ----------------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ----------------
+# Python
+# ----------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+env/
+.venv/
+
+# ----------------
+# Airflow
+# ----------------
+airflow/airflow.db
+airflow/logs/
+airflow/airflow-webserver.pid
+*.pid
+
+# ----------------
+# dbt
+# ----------------
+dbt_part/shopstream_dbt/target/
+dbt_part/shopstream_dbt/dbt_packages/
+dbt_part/shopstream_dbt/logs/
+dbt_part/logs/
+*.log
+
+# ----------------
+# IDE & Editors
+# ----------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----------------
+# Jupyter Notebooks
+# ----------------
+.ipynb_checkpoints/
+*.ipynb
+
+# ----------------
+# Temporary Files
+# ----------------
+*.tmp
+*.temp
+*.bak
+
+# ----------------
+# Docker
+# ----------------
+docker-compose.override.yml
+.docker/
+
+# ----------------
+# Log Files
+# ----------------
+*.log
+logs/
+

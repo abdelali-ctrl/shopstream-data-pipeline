@@ -1,0 +1,19 @@
+# ================================
+# ShopStream - Python Dependencies
+# ================================
+
+# Database
+psycopg2-binary>=2.9.0
+
+# Data Processing
+pandas>=1.5.0
+faker>=18.0.0
+
+# AWS
+boto3>=1.26.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# dbt (if running locally)
+dbt-snowflake>=1.5.0
