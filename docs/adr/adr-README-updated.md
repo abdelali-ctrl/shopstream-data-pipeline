@@ -9,6 +9,7 @@ Short, dated documents recording non-obvious choices in the ShopStream codebase.
 | [0001](./0001-raw-vs-staging-naming.md) | Raw vs. staging — naming and schema separation | Accepted | 2026-04-28 |
 | [0002](./0002-surrogate-keys.md) | Surrogate keys on dimensions and facts | Accepted | 2026-04-28 |
 | [0003](./0003-margin-via-seed.md) | Margin estimation via a versioned seed file | Accepted | 2026-04-28 |
+| [0004](./0004-azure-blob-instead-of-s3.md) | Azure Blob Storage instead of AWS S3 for the data lake layer | Accepted | 2026-04-28 |
 
 ## Planned (not yet written)
 
