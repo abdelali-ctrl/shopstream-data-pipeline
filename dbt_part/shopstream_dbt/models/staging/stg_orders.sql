@@ -1,40 +1,46 @@
--- Modèle de staging pour les commandes
--- Fichier : models/staging/stg_orders.sql
--- Nettoyage, typage, renommage
+-- staging model: orders
+-- Layer: staging
+-- Materialization: view
+-- Purpose: light cleaning, typing, renaming. No business logic.
+-- Note: order amounts <= 0 are dropped here as a cleaning step (test data
+-- generator can produce $0 orders for cancelled rows). If a real source ever
+-- has legitimately-zero orders, move this filter to a dedicated mart.
 
-{{
-    config(
-        materialized='view',
-        tags=['staging', 'orders']
-    )
-}}
+{{ config(
+    materialized='view',
+    tags=['staging', 'orders']
+) }}
 
-WITH source AS (
-    SELECT * FROM {{ source('staging', 'stg_orders') }}
+with source as (
+
+    select * from {{ source('raw', 'raw_orders') }}
+
 ),
 
-renamed AS (
-    SELECT
-        -- Clés primaires
-        id AS order_id,
-        user_id AS customer_id,
-        
-        -- Timestamps
-        created_at AS order_date,
-        
-        -- Métriques
-        total_amount AS order_amount,
-        
-        -- Attributs
-        UPPER(status) AS order_status,
-        UPPER(country) AS country_code,
-        LOWER(payment_method) AS payment_method,
-        
-        -- Métadonnées
-        _loaded_at
-        
-    FROM source
-    WHERE total_amount > 0
+renamed as (
+
+    select
+        -- identifiers
+        id                                  as order_id,
+        user_id                             as customer_id,
+
+        -- timestamps
+        created_at                          as order_at,
+        cast(created_at as date)            as order_date,
+
+        -- metrics
+        total_amount                        as order_amount,
+
+        -- attributes
+        lower(status)                       as order_status,
+        upper(country)                      as country_code,
+        lower(payment_method)               as payment_method,
+
+
+    from source
+    where id is not null
+      and total_amount > 0
+
 )
 
-SELECT * FROM renamed
+select * from renamed

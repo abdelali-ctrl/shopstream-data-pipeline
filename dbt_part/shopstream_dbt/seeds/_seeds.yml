@@ -1,0 +1,22 @@
+version: 2
+
+seeds:
+  - name: product_margins
+    description: |
+      Per-category gross margin rates. Sourced manually from finance estimates
+      until the source system exposes a real margin field. See ADR-003.
+    config:
+      column_types:
+        product_category: varchar(100)
+        gross_margin_rate: decimal(4,2)
+    columns:
+      - name: product_category
+        tests:
+          - unique
+          - not_null
+      - name: gross_margin_rate
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1

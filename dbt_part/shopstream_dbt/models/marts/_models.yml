@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: mart_sales_overview
+    description: "Daily revenue and order metrics by country, category, and customer segment."
+    columns:
+      - name: sale_date
+        tests:
+          - not_null
+      - name: total_revenue
+        tests:
+          - not_null
+      - name: total_orders
+        tests:
+          - not_null
+
+  - name: mart_customer_ltv
+    description: "Per-customer RFM segmentation, LTV, and churn risk."
+    columns:
+      - name: customer_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: rfm_segment
+        tests:
+          - accepted_values:
+              values:
+                - 'Champions'
+                - 'Loyal Customers'
+                - 'Promising'
+                - 'Potential Loyalists'
+                - 'At Risk'
+                - 'Cant Lose Them'
+                - 'Hibernating'
+                - 'Others'
+      - name: churn_risk
+        tests:
+          - accepted_values:
+              values: ['Low', 'Medium', 'High']
+
+  - name: mart_product_performance
+    description: "Per-product revenue, margin, and ABC classification."
+    columns:
+      - name: product_key
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
+      - name: abc_class
+        tests:
+          - accepted_values:
+              values: ['A', 'B', 'C']
+      - name: performance_tier
+        tests:
+          - accepted_values:
+              values: ['Top 10', 'Top 50', 'Long Tail']

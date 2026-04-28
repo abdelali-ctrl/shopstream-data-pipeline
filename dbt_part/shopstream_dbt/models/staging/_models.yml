@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: stg_users
+    description: "One row per user. Light cleaning over raw_users."
+    columns:
+      - name: user_id
+        description: "Surrogate-stable natural key from source. PK of the staging view."
+        tests:
+          - unique
+          - not_null
+      - name: email
+        description: "Lowercased and trimmed."
+        tests:
+          - unique
+          - not_null
+      - name: country_code
+        description: "Uppercased ISO country code."
+      - name: plan_type
+        tests:
+          - accepted_values:
+              values: ['freemium', 'premium', 'enterprise']
+
+  - name: stg_products
+    description: "One row per product. Light cleaning over raw_products."
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        tests:
+          - not_null
+      - name: current_price
+        tests:
+          - not_null
+
+  - name: stg_orders
+    description: "One row per order header. Filters out non-positive amounts as a data-quality cleaning step."
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+      - name: order_amount
+        tests:
+          - not_null
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'refunded']
+
+  - name: stg_order_items
+    description: "One row per (order, product). Grain of the fact_orders model."
+    columns:
+      - name: order_item_id
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_products')
+              field: product_id
+      - name: quantity
+        tests:
+          - not_null
+      - name: line_revenue
+        tests:
+          - not_null

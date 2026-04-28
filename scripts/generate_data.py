@@ -1,365 +1,234 @@
 """
 generate_data.py
-Script de génération de données pour ShopStream
-Emplacement : ShopStreamTP/scripts/generate_data.py
+
+Populate the ShopStream PostgreSQL database with synthetic e-commerce data
+(users, products, orders, order_items) using Faker.
+
+Idempotency:
+    Running this script multiple times appends new rows. To start clean,
+    truncate the tables first or drop and recreate the database.
+
+Volume:
+    The defaults below produce a small dataset suitable for the demo. Bump
+    USERS / PRODUCTS / ORDERS to stress-test the pipeline.
+
+v2 changes vs v1:
+    - Removed events and crm_contacts generation (deferred; see ADR-003).
+    - English-only comments and log messages.
+    - Type hints throughout; deprecated pandas APIs removed.
 """
 
-import os
-import sys
-import random
-import json
-import logging
-from datetime import datetime, timedelta
-from faker import Faker
-import psycopg2
-from psycopg2.extras import execute_batch
-from dotenv import load_dotenv
+from __future__ import annotations
 
-# =============================================================================
-# Logging Configuration
-# =============================================================================
+import logging
+import os
+import random
+import sys
+from datetime import datetime, timedelta
+from typing import Iterable
+
+import psycopg2
+from dotenv import load_dotenv
+from faker import Faker
+from psycopg2.extras import execute_batch
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('generate_data.log', encoding='utf-8')
-    ]
+        logging.StreamHandler()
+    ],
 )
-logger = logging.getLogger('ShopStream.GenerateData')
+logger = logging.getLogger("ShopStream.GenerateData")
 
-# Charger les variables d'environnement depuis .env
 load_dotenv()
 
-# Configuration de Faker (multi-langues pour réalisme)
-fake = Faker(['fr_FR', 'en_US', 'de_DE', 'es_ES'])
-
-# Configuration via variables d'environnement
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 DB_CONFIG = {
-    'host': os.environ.get('POSTGRES_HOST', 'localhost'),
-    'port': int(os.environ.get('POSTGRES_PORT', 5432)),
-    'database': os.environ.get('POSTGRES_DB', 'shopstream'),
-    'user': os.environ.get('POSTGRES_USER', 'postgres'),
-    'password': os.environ.get('POSTGRES_PASSWORD', '')
+    "host":     os.environ.get("POSTGRES_HOST", "localhost"),
+    "port":     int(os.environ.get("POSTGRES_PORT", 5432)),
+    "database": os.environ.get("POSTGRES_DB", "shopstream"),
+    "user":     os.environ.get("POSTGRES_USER", "postgres"),
+    "password": os.environ.get("POSTGRES_PASSWORD", ""),
 }
 
-# Constantes métier
-COUNTRIES = ['FRA', 'USA', 'DEU', 'ESP', 'GBR', 'ITA', 'CAN', 'AUS']
-PLAN_TYPES = ['freemium', 'premium', 'enterprise']
-CATEGORIES = ['Electronics', 'Fashion', 'Home', 'Books', 'Sports', 'Beauty', 'Toys']
-ORDER_STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled']
-EVENT_TYPES = ['page_view', 'add_to_cart', 'checkout_start', 'purchase', 'error']
-PAYMENT_METHODS = ['stripe', 'paypal', 'credit_card']
-SOURCES = ['organic', 'paid_ads', 'referral', 'email_campaign']
+# Volumes
+USERS = 500
+PRODUCTS = 200
+ORDERS = 2_000
+MIN_ITEMS_PER_ORDER = 1
+MAX_ITEMS_PER_ORDER = 5
 
-def get_connection():
-    """Connexion à PostgreSQL"""
-    logger.info("Connecting to PostgreSQL...")
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        logger.info("Connection successful")
-        return conn
-    except Exception as e:
-        logger.error(f"Connection failed: {e}")
-        logger.error("Check DB_CONFIG settings (host, database, user, password)")
-        sys.exit(1)
+COUNTRIES = ["FRA", "DEU", "ESP", "ITA", "GBR", "NLD", "BEL", "PRT", "SWE", "DNK"]
+PLAN_TYPES = ["freemium", "premium", "enterprise"]
+ORDER_STATUSES = ["pending", "paid", "shipped", "delivered", "cancelled", "refunded"]
+PAYMENT_METHODS = ["card", "paypal", "bank_transfer", "apple_pay"]
+CATEGORIES = ["electronics", "clothing", "books", "home", "beauty", "toys", "sports", "food"]
 
-def generate_users(conn, n=1000):
-    """Génère n utilisateurs"""
-    print(f"\nGénération de {n} utilisateurs...")
-    cursor = conn.cursor()
-    
-    users = []
-    for i in range(n):
-        if i % 100 == 0:
-            print(f"   ...  {i}/{n} utilisateurs générés")
-        
-        user = (
-            fake.email(),
+fake = Faker()
+random.seed(42)
+Faker.seed(42)
+
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+def connect() -> psycopg2.extensions.connection:
+    logger.info("Connecting to PostgreSQL at %s:%s/%s", DB_CONFIG["host"], DB_CONFIG["port"], DB_CONFIG["database"])
+    return psycopg2.connect(**DB_CONFIG)
+
+
+def insert_many(conn: psycopg2.extensions.connection, sql: str, rows: Iterable[tuple]) -> None:
+    rows = list(rows)
+    with conn.cursor() as cur:
+        execute_batch(cur, sql, rows, page_size=500)
+    conn.commit()
+    logger.info("Inserted %d rows", len(rows))
+
+
+# ---------------------------------------------------------------------------
+# Generators
+# ---------------------------------------------------------------------------
+
+def generate_users(conn: psycopg2.extensions.connection) -> list[int]:
+    logger.info("Generating %d users", USERS)
+    rows = []
+    for _ in range(USERS):
+        rows.append((
+            fake.unique.email(),
             fake.first_name(),
             fake.last_name(),
             random.choice(COUNTRIES),
-            random.choice(PLAN_TYPES) if random.random() > 0.7 else 'freemium',
-            fake.date_time_between(start_date='-2y', end_date='now'),
-            fake.date_time_between(start_date='-30d', end_date='now') if random.random() > 0.3 else None,
-            random. random() > 0.05
-        )
-        users.append(user)
-    
-    query = """
+            random.choices(PLAN_TYPES, weights=[0.7, 0.25, 0.05])[0],
+            fake.date_time_between(start_date="-2y", end_date="now"),
+            fake.date_time_between(start_date="-30d", end_date="now"),
+            random.random() > 0.05,  # 95% active
+        ))
+    sql = """
         INSERT INTO users (email, first_name, last_name, country, plan_type, created_at, last_login, is_active)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
-    
-    try:
-        execute_batch(cursor, query, users, page_size=100)
-        conn.commit()
-        print(f"{n} utilisateurs créés avec succès")
-    except Exception as e:
-        print(f"Erreur lors de la création des utilisateurs : {e}")
-        conn.rollback()
+    insert_many(conn, sql, rows)
 
-def generate_products(conn, n=200):
-    """Génère n produits"""
-    print(f"\nGénération de {n} produits...")
-    cursor = conn.cursor()
-    
-    products = []
-    for i in range(n):
-        if i % 50 == 0:
-            print(f"   ... {i}/{n} produits générés")
-        
-        merchant_id = random.randint(1, 100)
-        product = (
-            merchant_id,
-            fake.catch_phrase(),
-            fake.text(max_nb_chars=150),
-            random.choice(CATEGORIES),
-            round(random.uniform(5.0, 500.0), 2),
-            random.randint(0, 1000),
-            fake.date_time_between(start_date='-1y', end_date='now'),
-            datetime.now()
-        )
-        products.append(product)
-    
-    query = """
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM users")
+        return [r[0] for r in cur.fetchall()]
+
+
+def generate_products(conn: psycopg2.extensions.connection) -> list[tuple[int, float]]:
+    logger.info("Generating %d products", PRODUCTS)
+    rows = []
+    for _ in range(PRODUCTS):
+        price = round(random.uniform(5, 500), 2)
+        rows.append((
+            random.randint(1, 50),                        # merchant_id
+            fake.catch_phrase()[:255],                    # name
+            fake.text(max_nb_chars=200),                  # description
+            random.choice(CATEGORIES),                    # category
+            price,
+            random.randint(0, 1000),                      # stock_quantity
+            fake.date_time_between(start_date="-2y", end_date="-1y"),
+            fake.date_time_between(start_date="-1y", end_date="now"),
+        ))
+    sql = """
         INSERT INTO products (merchant_id, name, description, category, price, stock_quantity, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
-    
-    try:
-        execute_batch(cursor, query, products, page_size=100)
-        conn.commit()
-        print(f"{n} produits créés avec succès")
-    except Exception as e:
-        print(f"Erreur lors de la création des produits : {e}")
-        conn.rollback()
+    insert_many(conn, sql, rows)
 
-def generate_orders(conn, n=5000):
-    """Génère n commandes avec leurs lignes"""
-    print(f"\nGénération de {n} commandes...")
-    cursor = conn.cursor()
-    
-    # Récupération des IDs users et products existants
-    cursor.execute("SELECT id, country FROM users WHERE is_active = TRUE")
-    users = cursor.fetchall()
-    
-    cursor. execute("SELECT id, price FROM products")
-    products = cursor.fetchall()
-    
-    if not users or not products:
-        print("Pas d'utilisateurs ou de produits.  Générez-les d'abord.")
-        return
-    
-    orders = []
-    order_items = []
-    
-    for i in range(n):
-        if i % 500 == 0:
-            print(f"   ... {i}/{n} commandes générées")
-        
-        user = random.choice(users)
-        user_id = user[0]
-        country = user[1]
-        
-        created_at = fake.date_time_between(start_date='-6m', end_date='now')
-        
-        # Nombre d'articles par commande (1 à 5)
-        nb_items = random.randint(1, 5)
-        
-        total_amount = 0
-        order_products = random.sample(products, min(nb_items, len(products)))
-        
-        for product in order_products:
-            product_id = product[0]
-            unit_price = product[1]
-            quantity = random.randint(1, 3)
-            line_total = unit_price * quantity
-            total_amount += line_total
-            
-            order_items.append((
-                i + 1,
-                product_id,
-                quantity,
-                unit_price,
-                line_total
-            ))
-        
-        status = random.choices(
-            ORDER_STATUSES,
-            weights=[5, 40, 25, 25, 5]
-        )[0]
-        
-        orders.append((
-            user_id,
-            created_at,
-            round(total_amount, 2),
-            status,
-            country,
-            random.choice(PAYMENT_METHODS)
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, price FROM products")
+        return [(r[0], float(r[1])) for r in cur.fetchall()]
+
+
+def generate_orders_and_items(
+    conn: psycopg2.extensions.connection,
+    user_ids: list[int],
+    products: list[tuple[int, float]],
+) -> None:
+    logger.info("Generating %d orders with line items", ORDERS)
+
+    order_rows: list[tuple] = []
+    item_rows_by_order: dict[int, list[tuple]] = {}
+
+    # Build orders with their line items first; we need order ids to attach
+    # the items, so we insert orders, fetch back the ids, then insert items.
+    for i in range(ORDERS):
+        items_count = random.randint(MIN_ITEMS_PER_ORDER, MAX_ITEMS_PER_ORDER)
+        chosen = random.sample(products, k=items_count)
+        items: list[tuple[int, int, float, float]] = []  # product_id, qty, unit_price, line_total
+        order_total = 0.0
+        for product_id, price in chosen:
+            qty = random.randint(1, 5)
+            line_total = round(qty * price, 2)
+            items.append((product_id, qty, price, line_total))
+            order_total += line_total
+
+        order_rows.append((
+            random.choice(user_ids),
+            fake.date_time_between(start_date="-1y", end_date="now"),
+            round(order_total, 2),
+            random.choices(
+                ORDER_STATUSES,
+                weights=[0.05, 0.20, 0.20, 0.45, 0.05, 0.05],
+            )[0],
+            random.choice(COUNTRIES),
+            random.choice(PAYMENT_METHODS),
         ))
-    
-    # Insertion des commandes
-    query_orders = """
+        item_rows_by_order[i] = items  # index keyed for now
+
+    # Insert orders, get back ids in insertion order.
+    sql_orders = """
         INSERT INTO orders (user_id, created_at, total_amount, status, country, payment_method)
         VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
     """
-    
-    try:
-        execute_batch(cursor, query_orders, orders, page_size=100)
+    with conn.cursor() as cur:
+        order_ids: list[int] = []
+        for row in order_rows:
+            cur.execute(sql_orders, row)
+            order_ids.append(cur.fetchone()[0])
         conn.commit()
-        print(f"{n} commandes créées")
-    except Exception as e:
-        print(f"Erreur lors de la création des commandes : {e}")
-        conn.rollback()
-        return
-    
-    # Insertion des lignes de commande
-    query_items = """
+    logger.info("Inserted %d orders", len(order_ids))
+
+    # Now flatten items and attach the real order_id from the RETURNING.
+    item_rows: list[tuple] = []
+    for idx, oid in enumerate(order_ids):
+        for product_id, qty, unit_price, line_total in item_rows_by_order[idx]:
+            item_rows.append((oid, product_id, qty, unit_price, line_total))
+
+    sql_items = """
         INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_total)
         VALUES (%s, %s, %s, %s, %s)
     """
-    
-    try:
-        execute_batch(cursor, query_items, order_items, page_size=100)
-        conn.commit()
-        print(f"{len(order_items)} lignes de commande créées")
-    except Exception as e:
-        print(f"Erreur lors de la création des lignes : {e}")
-        conn.rollback()
+    insert_many(conn, sql_items, item_rows)
 
-def generate_events(conn, n=10000):
-    """Génère n événements"""
-    print(f"\nGénération de {n} événements...")
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT id FROM users LIMIT 500")
-    user_ids = [row[0] for row in cursor.fetchall()]
-    
-    if not user_ids:
-        print("Pas d'utilisateurs. Générez-les d'abord.")
-        return
-    
-    events = []
-    for i in range(n):
-        if i % 1000 == 0:
-            print(f"   ... {i}/{n} événements générés")
-        
-        user_id = random.choice(user_ids) if random.random() > 0.1 else None
-        event_type = random.choice(EVENT_TYPES)
-        event_ts = fake.date_time_between(start_date='-3m', end_date='now')
-        
-        if event_type == 'page_view':
-            metadata = json.dumps({
-                'page_url': fake.uri_path(),
-                'device': random.choice(['mobile', 'desktop', 'tablet'])
-            })
-        elif event_type == 'add_to_cart':
-            metadata = json.dumps({
-                'product_id': random.randint(1, 200),
-                'quantity': random.randint(1, 3)
-            })
-        else:
-            metadata = json.dumps({})
-        
-        events.append((
-            user_id,
-            event_type,
-            event_ts,
-            metadata
-        ))
-    
-    query = """
-        INSERT INTO events (user_id, event_type, event_ts, metadata)
-        VALUES (%s, %s, %s, %s)
-    """
-    
-    try:
-        execute_batch(cursor, query, events, page_size=100)
-        conn.commit()
-        print(f"{n} événements créés")
-    except Exception as e:
-        print(f"Erreur lors de la création des événements : {e}")
-        conn.rollback()
 
-def generate_crm_contacts(conn, n=500):
-    """Génère n contacts CRM"""
-    print(f"\nGénération de {n} contacts CRM...")
-    cursor = conn.cursor()
-    
-    contacts = []
-    for i in range(n):
-        if i % 100 == 0:
-            print(f"   ... {i}/{n} contacts générés")
-        
-        converted = random.random() > 0.6
-        created_at = fake.date_time_between(start_date='-1y', end_date='now')
-        
-        contact = (
-            fake.email(),
-            fake.first_name(),
-            fake.last_name(),
-            random.choice(SOURCES),
-            f"CAMP_{random.randint(1000, 9999)}",
-            created_at,
-            converted,
-            fake.date_time_between(start_date=created_at, end_date='now') if converted else None
-        )
-        contacts.append(contact)
-    
-    query = """
-        INSERT INTO crm_contacts (email, first_name, last_name, source, campaign_id, created_at, converted, converted_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """
-    
-    try:
-        execute_batch(cursor, query, contacts, page_size=100)
-        conn.commit()
-        print(f"{n} contacts CRM créés")
-    except Exception as e:
-        print(f"Erreur lors de la création des contacts : {e}")
-        conn.rollback()
+# ---------------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------------
 
-def main():
-    """Point d'entrée principal"""
-    print("="*70)
-    print("GENERATION DE DONNEES SHOPSTREAM")
-    print("="*70)
-    
-    conn = get_connection()
-    
+def main() -> None:
+    started = datetime.now()
+    logger.info("=== ShopStream data generation started ===")
+
+    conn = connect()
     try:
-        # Génération dans l'ordre (à cause des clés étrangères)
-        generate_users(conn, n=1000)
-        generate_products(conn, n=200)
-        generate_orders(conn, n=5000)
-        generate_events(conn, n=10000)
-        generate_crm_contacts(conn, n=500)
-        
-        print("\n" + "="*70)
-        print("GENERATION TERMINEE AVEC SUCCES")
-        print("="*70)
-        print("\nRécapitulatif :")
-        cursor = conn.cursor()
-        cursor.execute("SELECT 'users' AS table_name, COUNT(*) FROM users")
-        print(f"   - Users : {cursor.fetchone()[1]}")
-        cursor.execute("SELECT COUNT(*) FROM products")
-        print(f"   - Products : {cursor.fetchone()[0]}")
-        cursor.execute("SELECT COUNT(*) FROM orders")
-        print(f"   - Orders : {cursor.fetchone()[0]}")
-        cursor.execute("SELECT COUNT(*) FROM order_items")
-        print(f"   - Order Items : {cursor.fetchone()[0]}")
-        cursor.execute("SELECT COUNT(*) FROM events")
-        print(f"   - Events : {cursor.fetchone()[0]}")
-        cursor.execute("SELECT COUNT(*) FROM crm_contacts")
-        print(f"   - CRM Contacts : {cursor.fetchone()[0]}")
-        
-    except Exception as e:
-        print(f"\nERREUR GLOBALE : {e}")
-        conn.rollback()
+        user_ids = generate_users(conn)
+        products = generate_products(conn)
+        generate_orders_and_items(conn, user_ids, products)
     finally:
         conn.close()
-        print("\nConnexion fermée.")
+
+    elapsed = datetime.now() - started
+    logger.info("=== Done in %s ===", elapsed)
+
 
 if __name__ == "__main__":
     main()

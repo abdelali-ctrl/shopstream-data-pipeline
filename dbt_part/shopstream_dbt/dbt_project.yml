@@ -1,61 +1,59 @@
-
-# Name your project! Project names should contain only lowercase characters
-# and underscores. A good package name should reflect your organization's
-# name or the intended use of these models
 name: 'shopstream_dbt'
-version: '1.0.0'
+version: '2.0.0'
 config-version: 2
 
-# This setting configures which "profile" dbt uses for this project.
 profile: 'shopstream_dbt'
 
-# These configurations specify where dbt should look for different types of files.
-# The `model-paths` config, for example, states that models in this project can be
-# found in the "models/" directory. You probably won't need to change these!
-model-paths: ["models"]
+# File paths
+model-paths:    ["models"]
 analysis-paths: ["analyses"]
-test-paths: ["tests"]
-seed-paths: ["seeds"]
-macro-paths: ["macros"]
+test-paths:     ["tests"]
+seed-paths:     ["seeds"]
+macro-paths:    ["macros"]
 snapshot-paths: ["snapshots"]
 
 target-path: "target"
-clean-targets:         # directories to be removed by `dbt clean`
+clean-targets:
   - "target"
   - "dbt_packages"
 
+# ============================================================
+# Models
+# ============================================================
+# Three layers, each in its own Snowflake schema:
+#   staging  -> views (cheap, refresh on every run)
+#   core     -> tables (dim_*, fact_*)
+#   marts    -> tables (mart_*)
+#
+# generate_schema_name macro is overridden in macros/ so the
+# physical schema names match the labels here exactly.
 
-# Configuring models
-# Full documentation: https://docs.getdbt.com/docs/configuring-models
-
-# In this example config, we tell dbt to build all models in the example/
-# directory as views. These settings can be overridden in the individual model
-# files using the `{{ config(...) }}` macro.
 models:
   shopstream_dbt:
-    # Config indicated by + and applies to all files under models/example/
-    example:
-      +materialized: view
-# Modèles de staging
     staging:
       +materialized: view
       +schema: staging
-      
-    # Modèles Core (dimensions + faits)
     core:
       +materialized: table
       +schema: core
-      dimensions:
-        +materialized: table
-      facts:
-        +materialized: table
-      
-    # Data Marts (tables finales)
     marts:
       +materialized: table
       +schema: marts
 
-# Variables globales
+# ============================================================
+# Seeds
+# ============================================================
+seeds:
+  shopstream_dbt:
+    +schema: core
+    product_margins:
+      +column_types:
+        product_category: varchar(100)
+        gross_margin_rate: decimal(4,2)
+
+# ============================================================
+# Project-wide variables
+# ============================================================
 vars:
   start_date: '2022-01-01'
   premium_plans: ['premium', 'enterprise']

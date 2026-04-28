@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
-  <img src="https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="AWS S3"/>
+  <img src="https://img.shields.io/badge/Azure_Blob_Storage-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white" alt="Azure Blob Storage"/>
   <img src="https://img.shields.io/badge/Snowflake-29B5E8?style=for-the-badge&logo=snowflake&logoColor=white" alt="Snowflake"/>
   <img src="https://img.shields.io/badge/dbt-FF694B?style=for-the-badge&logo=dbt&logoColor=white" alt="dbt"/>
   <img src="https://img.shields.io/badge/Apache_Airflow-017CEE?style=for-the-badge&logo=apacheairflow&logoColor=white" alt="Airflow"/>
@@ -8,234 +8,235 @@
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
 </p>
 
-# 🛒 ShopStream - Modern Cloud Data Pipeline
+# ShopStream — Modern Cloud Data Pipeline
 
-A **production-ready data engineering project** demonstrating a complete end-to-end cloud data pipeline for e-commerce analytics. Built with the Modern Data Stack.
+A reference data pipeline for e-commerce analytics built on the Modern Data Stack: synthetic source in PostgreSQL, landed to Azure Blob as date-partitioned CSV, loaded to Snowflake, transformed by dbt into a Kimball star schema with three business marts, orchestrated by Airflow, surfaced in Power BI.
+
+> **Status:** v2.0 (2026-04-28). See [`CHANGELOG.md`](./CHANGELOG.md) for what changed since v1.
 
 ---
 
-## 📊 Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Source["🗄️ Source Layer"]
+    subgraph Source["Source"]
         A[("PostgreSQL")]
     end
-    
-    subgraph Ingestion["📤 Ingestion Layer"]
-        B["Python ETL Scripts"]
+    subgraph Ingestion["Ingestion"]
+        B["Python ETL"]
     end
-    
-    subgraph Storage["☁️ Cloud Storage"]
-        C[("AWS S3\nData Lake")]
+    subgraph Lake["Data Lake"]
+        C[("Azure Blob<br/>raw/postgres/&lt;table&gt;/&lt;date&gt;/")]
     end
-    
-    subgraph Warehouse["❄️ Data Warehouse"]
-        D[("Snowflake")]
+    subgraph DWH["Snowflake"]
+        D1[("RAW<br/>(landing)")]
+        D2[("STAGING<br/>(views)")]
+        D3[("CORE<br/>(dim_*, fact_*)")]
+        D4[("MARTS<br/>(mart_*)")]
     end
-    
-    subgraph Transform["🔄 Transformation"]
-        E["dbt\n(Staging → Core → Marts)"]
+    subgraph BI["BI"]
+        G["Power BI"]
     end
-    
-    subgraph Orchestration["⚙️ Orchestration"]
-        F["Apache Airflow"]
-    end
-    
-    subgraph BI["📈 Business Intelligence"]
-        G["Power BI Dashboard"]
-    end
-    
-    A --> B --> C --> D --> E
+    F["Airflow"]
+
+    A --> B --> C --> D1 --> D2 --> D3 --> D4 --> G
     F -.->|orchestrates| B
-    F -.->|orchestrates| E
-    E --> G
+    F -.->|orchestrates| D1
+    F -.->|orchestrates| D2
 ```
 
----
+Each Snowflake schema has one purpose:
 
-## ✨ Features
-
-- 🔄 **Automated Data Generation** — Realistic e-commerce data using Faker
-- ☁️ **Cloud-Native Architecture** — AWS S3 data lake with partitioned storage
-- ❄️ **Snowflake Data Warehouse** — Scalable cloud DWH with staging tables
-- 📐 **Dimensional Modeling** — Star schema with dbt (dimensions, facts, marts)
-- 📊 **Business Intelligence** — Power BI dashboard for sales analytics
-- ⚙️ **Orchestration** — Apache Airflow DAG for automated pipelines
-- 🐳 **Docker Ready** — One-command setup with Docker Compose
+| Schema | What lives here | Materialization |
+|---|---|---|
+| `RAW` | Loaded by COPY INTO from Azure Blob. Mirrors PostgreSQL 1:1, plus a `_loaded_at` audit column. | Tables |
+| `STAGING` | dbt staging models: cleaning, typing, renaming. No business logic. | Views |
+| `CORE` | Dimensions (`dim_customers`, `dim_products`) and facts (`fact_orders`). Surrogate keys throughout. | Tables |
+| `MARTS` | Business-ready: `mart_sales_overview`, `mart_customer_ltv`, `mart_product_performance`. | Tables |
 
 ---
 
-## 📊 Power BI Dashboard
+## Data model
 
-### Vue d'ensemble (Overview)
-![Vue d'ensemble](docs/Vue%20d'ensemble.png)
+```mermaid
+erDiagram
+    FACT_ORDERS ||--o{ DIM_CUSTOMERS : customer_key
+    FACT_ORDERS ||--o{ DIM_PRODUCTS : product_key
 
-### Analyse Clients (Customer Analysis)
-![Analyse Clients](docs/Analyse%20Clients.png)
+    DIM_CUSTOMERS {
+        string customer_key PK
+        int customer_id
+        string email
+        string country_code
+        string customer_segment
+        string customer_status
+    }
+    DIM_PRODUCTS {
+        string product_key PK
+        int product_id
+        string product_name
+        string product_category
+        decimal current_price
+        decimal gross_margin_rate
+    }
+    FACT_ORDERS {
+        string order_line_key PK
+        string order_key
+        string customer_key FK
+        string product_key FK
+        date date_key
+        int quantity_sold
+        decimal line_revenue
+        decimal estimated_margin
+    }
+```
 
-## 🚀 Quick Start
+### Marts
 
-### Option 1: Docker (Recommended)
+| Mart | Grain | Use case |
+|---|---|---|
+| `mart_sales_overview` | day × country × category × segment | Daily revenue trends, BI dashboard top page. |
+| `mart_customer_ltv` | one row per customer | RFM segmentation, churn risk scoring. |
+| `mart_product_performance` | one row per product | Merchandising; ABC analysis. |
+
+---
+
+## Quick start
+
+### Docker
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/shopstream.git
+git clone https://github.com/<you>/shopstream.git
 cd shopstream
 
-# Start all services
-docker-compose up -d
+cp .env.example .env
+# edit .env with your Azure / Snowflake credentials
 
-# Access Airflow UI
-open http://localhost:8080  # admin/admin
+docker compose up -d
+
+# Airflow UI: http://localhost:8080  (admin / admin)
+# PostgreSQL: localhost:5432         (postgres / postgres123)
 ```
 
-### Option 2: Manual Setup
+### Manual
 
 ```bash
-# 1. Create Python virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your credentials
-
-# 3. Create PostgreSQL database and tables
-psql -U postgres -c "CREATE DATABASE shopstream;"
-psql -U postgres -d shopstream -f scripts/schema.sql
-
-# 4. Generate sample data
+# 1. PostgreSQL: schema + data
+createdb -U postgres shopstream
+psql   -U postgres -d shopstream -f scripts/schema.sql
 python scripts/generate_data.py
 
-# 5. Export to S3
-python scripts/export_to_s3.py
+# 2. PostgreSQL -> Azure Blob
+python scripts/export_to_azure_blob.py
 
-# 6. Run dbt transformations
+# 3. Snowflake: setup once, then COPY INTO each day
+#    Run scripts/snowflake_setup.sql in a Snowflake worksheet,
+#    then scripts/snowflake_copy_into_azure.sql with the date filled in,
+#    or let Airflow run scripts/run_snowflake_copy_into.py.
+
+# 4. dbt
 cd dbt_part/shopstream_dbt
-dbt run
+dbt deps
+dbt seed
+dbt build              # runs models AND their tests, fail-fast
+dbt docs generate
 ```
 
 ---
 
-## 🏗️ Project Structure
+## Tests
+
+```bash
+cd dbt_part/shopstream_dbt
+
+# Run only source-level tests (catches schema drift / load failures).
+dbt test --select source:raw
+
+# Run only model-level tests.
+dbt test --select staging core marts
+
+# `dbt build` is the canonical command: builds models and runs their tests
+# in dependency order, fails the pipeline on the first test failure.
+dbt build --fail-fast
+```
+
+The test suite covers `unique` and `not_null` on every PK, `relationships` on every FK between layers, and `accepted_values` on enums (order_status, plan_type, segments, abc_class).
+
+---
+
+## Project layout
 
 ```
 shopstream/
-│
-├── 📜 scripts/                         # Python & SQL Scripts
-│   ├── schema.sql                      # PostgreSQL schema (6 tables)
-│   ├── generate_data.py                # Generate sample e-commerce data
-│   ├── export_to_s3.py                 # Export PostgreSQL → S3
-│   ├── snowflake_setup.sql             # Complete Snowflake setup (DB, schemas, tables)
-│   ├── snowflake_copy_into.sql         # Snowflake COPY INTO commands
-│   └── snowflake_verify_data.sql       # Data verification queries
-│
-├── 🔄 dbt_part/                        # dbt Transformation Project
+├── airflow/
+│   └── dags/shopstream_pipeline_dag.py     # Daily orchestration; uses dbt build
+├── dbt_part/
 │   └── shopstream_dbt/
-│       ├── models/
-│       │   ├── staging/                # stg_orders
-│       │   ├── core/                   # dim_customers, dim_products, fact_orders
-│       │   └── marts/                  # mart_sales_overview, mart_customer_ltv, mart_product_performance
-│       └── dbt_project.yml
-│
-├── ⚙️ airflow/                         # Airflow Orchestration
-│   ├── dags/
-│   │   └── shopstream_pipeline_dag.py  # Daily ETL pipeline DAG
-│   └── airflow.cfg
-│
-├── 📁 docs/                            # Documentation
-│   └── dashboard_preview.md            # Dashboard screenshots guide
-│
-├── 🐳 docker-compose.yml               # Docker setup (PostgreSQL + Airflow)
-├── .env.example                        # Environment template
-├── .gitignore
-├── requirements.txt
+│       ├── dbt_project.yml
+│       ├── packages.yml                     # dbt_utils, dbt_expectations
+│       ├── macros/generate_schema_name.sql  # schema names without target prefix
+│       ├── seeds/product_margins.csv        # per-category margin (ADR-003)
+│       └── models/
+│           ├── staging/  stg_users, stg_products, stg_orders, stg_order_items
+│           ├── core/     dim_customers, dim_products, fact_orders
+│           └── marts/    mart_sales_overview, mart_customer_ltv, mart_product_performance
+├── scripts/
+│   ├── schema.sql                           # PostgreSQL: 4 tables
+│   ├── generate_data.py                     # Faker -> PostgreSQL
+│   ├── export_to_azure_blob.py                      # PostgreSQL -> Azure Blob (CSV)
+│   ├── snowflake_setup.sql                  # DB, schemas, warehouses, raw tables
+│   ├── snowflake_copy_into_azure.sql        # Azure Blob -> RAW.RAW_*
+│   ├── run_snowflake_copy_into.py          # Executes COPY INTO for Airflow
+│   └── snowflake_verify_data.sql            # smoke tests + consistency checks
+├── docs/
+│   ├── adr/                                 # Architecture Decision Records
+│   ├── Vue d'ensemble.png                   # Power BI: overview
+│   └── Analyse Clients.png                  # Power BI: customer analysis
+├── docker-compose.yml
+├── CHANGELOG.md
 └── README.md
 ```
 
 ---
 
-## 📈 Data Model
+## Architecture decisions
 
-### Star Schema
+Non-obvious choices are recorded in [`docs/adr/`](./docs/adr/). The first three explain the v2 layout:
 
-```mermaid
-erDiagram
-    FACT_ORDERS ||--o{ DIM_CUSTOMERS : "customer_key"
-    FACT_ORDERS ||--o{ DIM_PRODUCTS : "product_key"
-    
-    DIM_CUSTOMERS {
-        int customer_key PK
-        string email
-        string full_name
-        string country
-        string customer_segment
-    }
-    
-    DIM_PRODUCTS {
-        int product_key PK
-        string name
-        string category
-        decimal price
-    }
-    
-    FACT_ORDERS {
-        int order_key PK
-        int customer_key FK
-        int product_key FK
-        date date_key
-        int quantity_sold
-        decimal line_revenue
-    }
-```
-
-### Data Marts
-
-| Mart | Description |
-|------|-------------|
-| `mart_sales_overview` | Daily sales by country, category, segment |
-| `mart_customer_ltv` | Customer RFM segmentation & churn risk |
-| `mart_product_performance` | ABC analysis & product rankings |
+- [ADR-001](./docs/adr/0001-raw-vs-staging-naming.md) — Raw vs. staging: naming and schema separation
+- [ADR-002](./docs/adr/0002-surrogate-keys.md) — Surrogate keys on dimensions and facts
+- [ADR-003](./docs/adr/0003-margin-via-seed.md) — Margin estimation via a versioned seed file
 
 ---
 
-## 🔧 Configuration
+## Roadmap
 
-### Environment Variables
+**v2.1** (planned):
 
-| Variable | Description |
-|----------|-------------|
-| `POSTGRES_HOST` | PostgreSQL host |
-| `POSTGRES_PASSWORD` | Database password |
-| `AWS_S3_BUCKET` | S3 bucket name |
-| `AWS_REGION` | AWS region |
+- GitHub Actions CI: `sqlfluff` + `ruff` on PR, `dbt build` against an isolated CI schema
+- Slack webhook on Airflow failure and on dbt test failure
+- Cost-tracking mart over `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`
+- Re-introduce `events` (VARIANT-typed engagement events) and `crm_contacts` (marketing attribution) with proper modeling
+- Incremental materialization on `fact_orders`
+- CSV → Parquet for the Azure Blob landing layer
 
-See [.env.example](.env.example) for all variables.
+**v3.0** (later):
 
----
-
-## 🎓 Skills Demonstrated
-
-- ✅ End-to-end data pipeline design
-- ✅ Cloud infrastructure (AWS S3, Snowflake)
-- ✅ Dimensional modeling (Kimball methodology)
-- ✅ Modern data stack (dbt, Airflow)
-- ✅ Docker containerization
-- ✅ Python ETL development
-- ✅ Business Intelligence
+- Streaming ingestion via Snowpipe Streaming + Dynamic Tables
+- A small RAG-based analyst assistant over the docs and the marts (Snowflake Cortex)
 
 ---
 
-## 📄 License
+## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-## 👨‍💻 Author
-
-**Abdelali** - Data Analyst Engineering Student
+[MIT](./LICENSE)
 
 ---
+
+## Author
+
+Abdelali Amassaghrou — Data/AI Engineer.

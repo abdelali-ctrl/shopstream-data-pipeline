@@ -1,0 +1,97 @@
+version: 2
+
+# ============================================================
+# Sources: RAW schema (loaded by COPY INTO from Azure Blob)
+# ============================================================
+# Source-level tests run on the landing tables and catch schema
+# drift / load failures before they propagate downstream.
+
+sources:
+  - name: raw
+    database: shopstream_dwh
+    schema: raw
+    description: "Landing zone for data loaded from Azure Blob by COPY INTO."
+    loaded_at_field: _loaded_at
+    freshness:
+      warn_after:  {count: 26, period: hour}
+      error_after: {count: 48, period: hour}
+
+    tables:
+      - name: raw_users
+        description: "Platform users / customers."
+        columns:
+          - name: id
+            description: "Source primary key (PostgreSQL serial)."
+            tests:
+              - unique
+              - not_null
+          - name: email
+            description: "User email; expected unique per-user."
+            tests:
+              - unique
+              - not_null
+          - name: country
+            description: "ISO-3166-1 alpha-3 country code (3 chars). Some legacy rows may be alpha-2."
+
+      - name: raw_products
+        description: "Product catalog."
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: price
+            description: "Listed price in EUR. Must be >= 0."
+            tests:
+              - not_null
+          - name: merchant_id
+            tests:
+              - not_null
+
+      - name: raw_orders
+        description: "Order headers."
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: user_id
+            description: "FK to raw_users.id."
+            tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'raw_users')
+                  field: id
+          - name: total_amount
+            description: "Order total in EUR."
+            tests:
+              - not_null
+          - name: status
+            tests:
+              - accepted_values:
+                  values: ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'refunded']
+
+      - name: raw_order_items
+        description: "Order line items: one row per (order, product)."
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: order_id
+            description: "FK to raw_orders.id."
+            tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'raw_orders')
+                  field: id
+          - name: product_id
+            description: "FK to raw_products.id."
+            tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'raw_products')
+                  field: id
+          - name: quantity
+            tests:
+              - not_null

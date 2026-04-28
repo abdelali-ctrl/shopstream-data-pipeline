@@ -9,11 +9,14 @@ psycopg2-binary>=2.9.0
 pandas>=1.5.0
 faker>=18.0.0
 
-# AWS
-boto3>=1.26.0
+# Azure Blob Storage
+azure-storage-blob>=12.19.0
 
 # Environment
 python-dotenv>=1.0.0
 
 # dbt (if running locally)
 dbt-snowflake>=1.5.0
+
+# Snowflake connector used by Airflow load/verify tasks
+snowflake-connector-python>=3.0.0

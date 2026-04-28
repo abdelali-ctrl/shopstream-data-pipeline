@@ -1,64 +1,85 @@
--- Dimension Produits
--- Fichier : models/core/dimensions/dim_products. sql
+-- Dimension: Products
+-- Layer: core
+-- Grain: one row per product
+-- Surrogate key strategy: see ADR-002.
+-- Margin: comes from a seed file (seeds/product_margins.csv); see ADR-003.
 
-{{
-    config(
-        materialized='table',
-        tags=['core', 'dimension']
-    )
-}}
+{{ config(
+    materialized='table',
+    tags=['core', 'dimension']
+) }}
 
-WITH products AS (
-    SELECT * FROM {{ source('staging', 'stg_products') }}
+with products as (
+
+    select * from {{ ref('stg_products') }}
+
 ),
 
-product_stats AS (
-    SELECT
+product_stats as (
+
+    -- Lifetime sales aggregates per product, for convenience columns on the dimension.
+    select
         product_id,
-        SUM(quantity) AS total_quantity_sold,
-        SUM(line_total) AS total_revenue,
-        COUNT(DISTINCT order_id) AS total_orders
-    FROM {{ source('staging', 'stg_order_items') }}
-    GROUP BY product_id
+        sum(quantity)               as total_quantity_sold,
+        sum(line_revenue)           as total_revenue,
+        count(distinct order_id)    as total_orders
+    from {{ ref('stg_order_items') }}
+    group by 1
+
 ),
 
-final AS (
-    SELECT
-        -- Clé primaire
-        p.id AS product_key,
-        
-        -- Attributs
-        p.name AS product_name,
-        p. description AS product_description,
-        p. category AS product_category,
+margins as (
+
+    -- Per-category gross margin rate. Falls back to 0.20 if the category is
+    -- not present in the seed (acts as a deliberately-conservative default).
+    select * from {{ ref('product_margins') }}
+
+),
+
+final as (
+
+    select
+        -- surrogate key
+        {{ dbt_utils.generate_surrogate_key(['p.product_id']) }}    as product_key,
+
+        -- natural key
+        p.product_id,
+
+        -- attributes
+        p.product_name,
+        p.product_description,
+        p.product_category,
         p.merchant_id,
-        
-        -- Prix
-        p.price AS current_price,
-        
-        -- Stock
-        p.stock_quantity AS current_stock,
-        
-        -- Métriques calculées
-        COALESCE(s.total_quantity_sold, 0) AS total_quantity_sold,
-        COALESCE(s.total_revenue, 0) AS total_revenue,
-        COALESCE(s.total_orders, 0) AS total_orders,
-        
-        -- Classification
-        CASE
-            WHEN s.total_revenue IS NULL THEN 'No Sales'
-            ELSE 'Active'
-        END AS product_status,
-        
-        -- Dates
-        p.created_at AS product_created_at,
-        p.updated_at AS product_updated_at,
-        
-        -- Métadonnées
-        CURRENT_TIMESTAMP() AS _dbt_updated_at
-        
-    FROM products p
-    LEFT JOIN product_stats s ON p.id = s.product_id
+
+        -- pricing & inventory
+        p.current_price,
+        p.current_stock,
+
+        -- margin (sourced from seed; see ADR-003)
+        coalesce(m.gross_margin_rate, 0.20)                          as gross_margin_rate,
+
+        -- denormalized lifetime metrics
+        coalesce(s.total_quantity_sold, 0)                           as total_quantity_sold,
+        coalesce(s.total_revenue, 0)                                 as total_revenue,
+        coalesce(s.total_orders, 0)                                  as total_orders,
+
+        -- status
+        case
+            when s.total_revenue is null then 'No Sales'
+            else 'Active'
+        end                                                          as product_status,
+
+        -- key dates
+        p.product_created_at,
+        p.product_updated_at,
+
+        -- audit
+        current_timestamp()                                          as _dbt_updated_at
+
+    from products p
+    left join product_stats s on p.product_id = s.product_id
+    left join margins        m on p.product_category = m.product_category
+
 )
 
-SELECT * FROM final
+select * from final

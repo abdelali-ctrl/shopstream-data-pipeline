@@ -1,253 +1,296 @@
 """
 shopstream_pipeline_dag.py
-DAG Airflow pour le pipeline quotidien ShopStream
 
-Ce DAG orchestre :
-1. Extraction PostgreSQL vers S3
-2. Chargement S3 vers Snowflake Staging
-3. Transformations dbt (staging vers core vers marts)
-4. Tests de qualité dbt
+Daily orchestration for ShopStream:
+    1. Extract PostgreSQL -> Azure Blob (CSV per table, partitioned by date)
+    2. Load Azure Blob -> Snowflake RAW (COPY INTO, run by an external operator below)
+    3. Build dbt: staging -> core -> marts, with tests inline (`dbt build`)
+    4. Smoke-test the warehouse
+    5. Notify on success / failure
 
-Emplacement : airflow/dags/shopstream_pipeline_dag.py
+Conventions:
+    - Tasks fail loudly (no swallowed errors). Slack alerting is wired via
+      `on_failure_callback` once the webhook is configured (see TODO).
+    - dbt is invoked with `dbt build` so models and their tests run in
+      dependency order, and a single test failure stops the pipeline.
+    - SLA: 90 minutes end-to-end at the demo data volume.
+
+v2 changes vs v1:
+    - `dbt run` + `dbt test` consolidated into `dbt build` (was previously
+      two tasks, with test failures silently swallowed).
+    - Schema names fixed (CORE_marts -> MARTS, etc.).
+    - All comments and log messages in English.
+    - SLAs added per task; Slack callback hook wired (placeholder).
 """
 
+from __future__ import annotations
+
+import logging
 import os
 import subprocess
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
 
-# Configuration
-PROJECT_ROOT = Path(__file__).parent.parent.parent  # shopstream/
+# ---------------------------------------------------------------------------
+# Paths and config
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = Path("/opt/airflow")
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 DBT_PROJECT_DIR = PROJECT_ROOT / "dbt_part" / "shopstream_dbt"
 
-# Logging
 logger = logging.getLogger(__name__)
 
-# Default arguments
+
+# ---------------------------------------------------------------------------
+# Callbacks
+# ---------------------------------------------------------------------------
+
+def notify_failure(context: dict[str, Any]) -> None:
+    """
+    Failure callback. Logs the failure and (TODO) posts to Slack.
+
+    Wire SLACK_WEBHOOK_URL via Airflow Variables / env, then replace the
+    log line below with a `requests.post(SLACK_WEBHOOK_URL, json=payload)`
+    call. Kept as a no-op for v2.0 so the DAG runs without external deps.
+    """
+    task = context["task_instance"]
+    logger.error(
+        "Pipeline failure: dag=%s task=%s execution_date=%s log_url=%s",
+        task.dag_id,
+        task.task_id,
+        context.get("ds"),
+        task.log_url,
+    )
+    # TODO(v2.1): Slack webhook integration.
+
+
+# ---------------------------------------------------------------------------
+# Default args
+# ---------------------------------------------------------------------------
+
 default_args = {
-    'owner': 'data_engineering',
-    'depends_on_past': False,
-    'start_date': datetime(2025, 1, 1),
-    'email': ['alerts@shopstream.com'],
-    'email_on_failure': True,
-    'email_on_retry': False,
-    'retries': 2,
-    'retry_delay': timedelta(minutes=5),
-    'execution_timeout': timedelta(hours=2)
+    "owner": "data_engineering",
+    "depends_on_past": False,
+    "start_date": datetime(2026, 1, 1),
+    "email": ["alerts@shopstream.example"],
+    "email_on_failure": True,
+    "email_on_retry": False,
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
+    "execution_timeout": timedelta(hours=2),
+    "sla": timedelta(minutes=30),
+    "on_failure_callback": notify_failure,
 }
 
-# DAG Definition
+
 dag = DAG(
-    'shopstream_daily_pipeline',
+    dag_id="shopstream_daily_pipeline",
     default_args=default_args,
-    description='Pipeline quotidien ShopStream: PostgreSQL → S3 → Snowflake → dbt → BI',
-    schedule_interval='0 2 * * *',  # Daily at 2 AM
+    description="Daily ShopStream pipeline: PostgreSQL -> Azure Blob -> Snowflake -> dbt -> BI",
+    schedule_interval="0 2 * * *",  # 02:00 UTC daily
     catchup=False,
-    tags=['production', 'daily', 'shopstream']
+    max_active_runs=1,
+    tags=["production", "daily", "shopstream"],
 )
 
 
-# =============================================================================
-# Task Functions
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Task functions
+# ---------------------------------------------------------------------------
 
-def extract_postgres_to_s3(**context):
-    """Extract data from PostgreSQL and upload to S3"""
-    execution_date = context['ds']
-    logger.info(f"Starting PostgreSQL → S3 extraction for {execution_date}")
-    
-    script_path = SCRIPTS_DIR / "export_to_s3.py"
-    
+def _run(cmd: list[str], cwd: Path | None = None, env_updates: dict[str, str] | None = None) -> None:
+    """Run a subprocess and raise on non-zero exit, surfacing stdout / stderr."""
+    env = os.environ.copy()
+    if env_updates:
+        env.update(env_updates)
+    logger.info("Running: %s (cwd=%s)", " ".join(cmd), cwd or os.getcwd())
     result = subprocess.run(
-        ['python', str(script_path)],
+        cmd,
+        cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
-        env={**os.environ, 'EXECUTION_DATE': execution_date}
+        env=env,
     )
-    
+    if result.stdout:
+        logger.info("stdout:\n%s", result.stdout)
+    if result.stderr:
+        logger.warning("stderr:\n%s", result.stderr)
     if result.returncode != 0:
-        logger.error(f"Export failed: {result.stderr}")
-        raise Exception(f"Export error: {result.stderr}")
-    
-    logger.info(result.stdout)
-    logger.info("PostgreSQL → S3 extraction completed successfully")
+        raise RuntimeError(f"Command failed with code {result.returncode}: {' '.join(cmd)}")
 
 
-def run_dbt_models(**context):
-    """Run dbt transformations"""
-    logger.info("Starting dbt run...")
-    
-    result = subprocess.run(
-        ['dbt', 'run'],
-        capture_output=True,
-        text=True,
-        cwd=str(DBT_PROJECT_DIR)
+def extract_postgres_to_azure_blob(**context: Any) -> None:
+    """Extract relational tables from PostgreSQL and upload CSVs to Azure Blob."""
+    execution_date = context["ds"]
+    logger.info("PostgreSQL -> Azure Blob extraction for %s", execution_date)
+    _run(
+        ["python", str(SCRIPTS_DIR / "export_to_azure_blob.py")],
+        cwd=SCRIPTS_DIR,
+        env_updates={"EXECUTION_DATE": execution_date},
     )
-    
-    if result.returncode != 0:
-        logger.error(f"dbt run failed: {result.stderr}")
-        raise Exception(f"dbt run error: {result.stderr}")
-    
-    logger.info(result.stdout)
-    logger.info("dbt transformations completed successfully")
 
 
-def run_dbt_tests(**context):
-    """Run dbt data quality tests"""
-    logger.info("Starting dbt test...")
-    
-    result = subprocess.run(
-        ['dbt', 'test'],
-        capture_output=True,
-        text=True,
-        cwd=str(DBT_PROJECT_DIR)
+def copy_azure_blob_to_snowflake(**context: Any) -> None:
+    """Load the current Azure Blob partition into Snowflake RAW with COPY INTO."""
+    execution_date = context["ds"]
+    logger.info("Azure Blob -> Snowflake RAW load for %s", execution_date)
+    _run(
+        ["python", str(SCRIPTS_DIR / "run_snowflake_copy_into.py")],
+        cwd=SCRIPTS_DIR,
+        env_updates={"EXECUTION_DATE": execution_date},
     )
-    
-    if result.returncode != 0:
-        logger.warning(f"Some dbt tests failed: {result.stderr}")
-        # Don't fail the DAG, just warn
-    
-    logger.info(result.stdout)
-    logger.info("dbt tests completed")
 
 
-def verify_snowflake_data(**context):
-    """Verify data in Snowflake marts"""
-    logger.info("Verifying Snowflake data...")
-    
+def verify_snowflake_data(**_: Any) -> list[tuple[str, int]]:
+    """
+    Smoke-test: confirm every layer has rows after the build.
+
+    Raises if any table is empty (loud failure beats silent data drift).
+    """
     try:
-        import snowflake.connector
-        
-        # Get connection details from environment
-        conn = snowflake.connector.connect(
-            account=os.environ.get('SNOWFLAKE_ACCOUNT'),
-            user=os.environ.get('SNOWFLAKE_USER'),
-            password=os.environ.get('SNOWFLAKE_PASSWORD'),
-            warehouse=os.environ.get('SNOWFLAKE_WAREHOUSE', 'LOADING_WH'),
-            database='SHOPSTREAM_DWH',
-            schema='CORE_marts'
-        )
-        
+        import snowflake.connector  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError(
+            "snowflake-connector-python is required in the Airflow image."
+        ) from exc
+
+    conn = snowflake.connector.connect(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        password=os.environ["SNOWFLAKE_PASSWORD"],
+        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "TRANSFORM_WH"),
+        database="SHOPSTREAM_DWH",
+    )
+
+    targets = [
+        ("RAW.RAW_USERS",                  "select count(*) from RAW.RAW_USERS"),
+        ("RAW.RAW_ORDERS",                 "select count(*) from RAW.RAW_ORDERS"),
+        ("STAGING.STG_ORDERS",             "select count(*) from STAGING.STG_ORDERS"),
+        ("CORE.DIM_CUSTOMERS",             "select count(*) from CORE.DIM_CUSTOMERS"),
+        ("CORE.FACT_ORDERS",               "select count(*) from CORE.FACT_ORDERS"),
+        ("MARTS.MART_SALES_OVERVIEW",      "select count(*) from MARTS.MART_SALES_OVERVIEW"),
+        ("MARTS.MART_CUSTOMER_LTV",        "select count(*) from MARTS.MART_CUSTOMER_LTV"),
+        ("MARTS.MART_PRODUCT_PERFORMANCE", "select count(*) from MARTS.MART_PRODUCT_PERFORMANCE"),
+    ]
+
+    results: list[tuple[str, int]] = []
+    empty: list[str] = []
+
+    try:
         cursor = conn.cursor()
-        
-        # Verification queries
-        tables = [
-            ('STAGING.STG_USERS', 'SELECT COUNT(*) FROM STAGING.STG_USERS'),
-            ('STAGING.STG_ORDERS', 'SELECT COUNT(*) FROM STAGING.STG_ORDERS'),
-            ('CORE_core.DIM_CUSTOMERS', 'SELECT COUNT(*) FROM CORE_core.DIM_CUSTOMERS'),
-            ('CORE_core.FACT_ORDERS', 'SELECT COUNT(*) FROM CORE_core.FACT_ORDERS'),
-            ('CORE_marts.MART_SALES_OVERVIEW', 'SELECT COUNT(*) FROM CORE_marts.MART_SALES_OVERVIEW'),
-            ('CORE_marts.MART_CUSTOMER_LTV', 'SELECT COUNT(*) FROM CORE_marts.MART_CUSTOMER_LTV'),
-        ]
-        
-        results = []
-        for table_name, query in tables:
-            cursor.execute(query)
-            count = cursor.fetchone()[0]
-            results.append((table_name, count))
-            logger.info(f"{table_name}: {count} rows")
-            
-            if count == 0:
-                logger.warning(f"WARNING: {table_name} is empty!")
-        
-        cursor.close()
+        try:
+            for name, query in targets:
+                cursor.execute(query)
+                count = int(cursor.fetchone()[0])
+                results.append((name, count))
+                logger.info("%s: %d rows", name, count)
+                if count == 0:
+                    empty.append(name)
+        finally:
+            cursor.close()
+    finally:
         conn.close()
-        
-        logger.info("Snowflake verification completed successfully")
-        return results
-        
-    except ImportError:
-        logger.warning("snowflake-connector-python not installed, skipping verification")
-    except Exception as e:
-        logger.error(f"Snowflake verification failed: {e}")
-        # Don't fail the DAG, just warn
+
+    if empty:
+        raise RuntimeError(f"Empty tables after build: {', '.join(empty)}")
+
+    return results
 
 
-def send_success_notification(**context):
-    """Send success notification"""
-    execution_date = context['ds']
-    logger.info(f"Pipeline completed successfully for {execution_date}")
-    # TODO: Add Slack/Teams/Email webhook integration
+def send_success_notification(**context: Any) -> None:
+    """Success callback. TODO(v2.1): Slack webhook."""
+    logger.info("Pipeline completed successfully for %s", context["ds"])
 
 
-# =============================================================================
-# Task Definitions
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
 
-# Start
-start = EmptyOperator(
-    task_id='start',
-    dag=dag
-)
+start = EmptyOperator(task_id="start", dag=dag)
 
-# Task 1: Generate sample data (optional, for testing)
+# Optional in production; useful in the demo so the DB stays populated.
 task_generate_data = BashOperator(
-    task_id='generate_sample_data',
+    task_id="generate_sample_data",
     bash_command=f'cd "{SCRIPTS_DIR}" && python generate_data.py',
-    dag=dag
+    dag=dag,
 )
 
-# Task 2: Extract PostgreSQL to S3
 task_extract = PythonOperator(
-    task_id='extract_postgres_to_s3',
-    python_callable=extract_postgres_to_s3,
-    dag=dag
+    task_id="extract_postgres_to_azure_blob",
+    python_callable=extract_postgres_to_azure_blob,
+    dag=dag,
 )
 
-# Task 3: Run dbt models
-task_dbt_run = PythonOperator(
-    task_id='dbt_run_models',
-    python_callable=run_dbt_models,
-    dag=dag
+task_copy_to_snowflake = PythonOperator(
+    task_id="copy_azure_blob_to_snowflake",
+    python_callable=copy_azure_blob_to_snowflake,
+    dag=dag,
 )
 
-# Task 4: Run dbt tests
-task_dbt_test = PythonOperator(
-    task_id='dbt_test_models',
-    python_callable=run_dbt_tests,
-    dag=dag
+# `dbt deps` is idempotent and cheap; ensures dbt_utils / dbt_expectations
+# are present even on a fresh container.
+task_dbt_deps = BashOperator(
+    task_id="dbt_deps",
+    bash_command=f'cd "{DBT_PROJECT_DIR}" && dbt deps',
+    dag=dag,
 )
 
-# Task 5: Generate dbt docs
+task_dbt_seed = BashOperator(
+    task_id="dbt_seed",
+    bash_command=f'cd "{DBT_PROJECT_DIR}" && dbt seed',
+    dag=dag,
+)
+
+# `dbt build` runs models in dependency order AND runs each model's tests
+# immediately after it builds. A failing test halts the DAG -- which is
+# exactly what we want a quality gate to do.
+task_dbt_build = BashOperator(
+    task_id="dbt_build",
+    bash_command=f'cd "{DBT_PROJECT_DIR}" && dbt build --fail-fast',
+    dag=dag,
+)
+
 task_dbt_docs = BashOperator(
-    task_id='dbt_generate_docs',
+    task_id="dbt_generate_docs",
     bash_command=f'cd "{DBT_PROJECT_DIR}" && dbt docs generate',
-    dag=dag
+    dag=dag,
 )
 
-# Task 6: Verify Snowflake data
-task_verify_data = PythonOperator(
-    task_id='verify_snowflake_data',
+task_verify = PythonOperator(
+    task_id="verify_snowflake_data",
     python_callable=verify_snowflake_data,
-    dag=dag
+    dag=dag,
 )
 
-# Task 7: Success notification
 task_success = PythonOperator(
-    task_id='send_success_notification',
+    task_id="send_success_notification",
     python_callable=send_success_notification,
-    dag=dag
+    dag=dag,
 )
 
-# End
-end = EmptyOperator(
-    task_id='end',
-    dag=dag
+end = EmptyOperator(task_id="end", dag=dag)
+
+# ---------------------------------------------------------------------------
+# Wiring
+# ---------------------------------------------------------------------------
+
+(
+    start
+    >> task_generate_data
+    >> task_extract
+    >> task_copy_to_snowflake
+    >> task_dbt_deps
+    >> task_dbt_seed
+    >> task_dbt_build
+    >> task_dbt_docs
+    >> task_verify
+    >> task_success
+    >> end
 )
-
-# =============================================================================
-# DAG Dependencies
-# =============================================================================
-
-# Pipeline flow:
-# start → generate_data → extract → dbt_run → dbt_test → dbt_docs → verify_data → success → end
-
-start >> task_generate_data >> task_extract >> task_dbt_run >> task_dbt_test >> task_dbt_docs >> task_verify_data >> task_success >> end
-

@@ -1,86 +1,97 @@
--- Customer Lifetime Value et segmentation RFM
--- Fichier : models/marts/mart_customer_ltv.sql
+-- Mart: Customer Lifetime Value & RFM Segmentation
+-- Layer: marts
+-- Grain: one row per customer (with completed orders)
+-- Use case: marketing segmentation, churn risk scoring.
+-- RFM cutoffs (30/90/180 days) are conventional defaults; tune per business.
 
-{{
-    config(
-        materialized='table',
-        tags=['mart', 'customer']
-    )
-}}
+{{ config(
+    materialized='table',
+    tags=['mart', 'customer']
+) }}
 
-WITH dim_customers AS (
-    SELECT * FROM {{ ref('dim_customers') }}
+with dim_customers as (
+
+    select * from {{ ref('dim_customers') }}
+
 ),
 
-fact_orders AS (
-    SELECT * FROM {{ ref('fact_orders') }}
-    WHERE is_completed = 1
+fact_orders as (
+
+    select * from {{ ref('fact_orders') }}
+    where is_completed = 1
+
 ),
 
-customer_metrics AS (
-    SELECT
+customer_metrics as (
+
+    select
         f.customer_key,
-        
-        -- Récence (Recency)
-        MAX(f.order_timestamp) AS last_order_date,
-        DATEDIFF(day, MAX(f.order_timestamp), CURRENT_DATE()) AS days_since_last_order,
-        
-        -- Fréquence (Frequency)
-        COUNT(DISTINCT f.order_key) AS total_orders,
-        DATEDIFF(day, MIN(f.order_timestamp), MAX(f.order_timestamp)) AS customer_lifespan_days,
-        
-        -- Montant (Monetary)
-        SUM(f.line_revenue) AS lifetime_value,
-        AVG(f.order_total) AS avg_order_value,
-        
-        -- Dates
-        MIN(f.order_timestamp) AS first_order_date
-        
-    FROM fact_orders f
-    GROUP BY 1
+
+        -- Recency
+        max(f.order_timestamp)                                              as last_order_date,
+        datediff(day, max(f.order_timestamp), current_date())               as days_since_last_order,
+
+        -- Frequency
+        count(distinct f.order_key)                                         as total_orders,
+        datediff(day, min(f.order_timestamp), max(f.order_timestamp))       as customer_lifespan_days,
+
+        -- Monetary
+        sum(f.line_revenue)                                                 as lifetime_value,
+        avg(f.order_total)                                                  as avg_order_value,
+
+        -- bookkeeping
+        min(f.order_timestamp)                                              as first_order_date
+
+    from fact_orders f
+    group by 1
+
 ),
 
-rfm_scores AS (
-    SELECT
+rfm_scores as (
+
+    select
         *,
-        -- Score RFM (1-5, 5 étant le meilleur)
-        NTILE(5) OVER (ORDER BY days_since_last_order ASC) AS recency_score,
-        NTILE(5) OVER (ORDER BY total_orders DESC) AS frequency_score,
-        NTILE(5) OVER (ORDER BY lifetime_value DESC) AS monetary_score
-        
-    FROM customer_metrics
+        -- Each score 1..5; 5 = best (most recent / most frequent / highest spend).
+        ntile(5) over (order by days_since_last_order asc)  as recency_score,
+        ntile(5) over (order by total_orders          desc) as frequency_score,
+        ntile(5) over (order by lifetime_value        desc) as monetary_score
+    from customer_metrics
+
 ),
 
-rfm_segments AS (
-    SELECT
+rfm_segments as (
+
+    select
         *,
-        recency_score + frequency_score + monetary_score AS rfm_total_score,
-        
-        -- Segmentation RFM
-        CASE
-            WHEN recency_score >= 4 AND frequency_score >= 4 AND monetary_score >= 4 THEN 'Champions'
-            WHEN recency_score >= 3 AND frequency_score >= 3 THEN 'Loyal Customers'
-            WHEN recency_score >= 4 AND frequency_score <= 2 THEN 'Promising'
-            WHEN recency_score >= 3 AND monetary_score >= 3 THEN 'Potential Loyalists'
-            WHEN recency_score <= 2 AND frequency_score >= 3 THEN 'At Risk'
-            WHEN recency_score <= 2 AND monetary_score >= 4 THEN 'Cant Lose Them'
-            WHEN recency_score <= 2 THEN 'Hibernating'
-            ELSE 'Others'
-        END AS rfm_segment
-        
-    FROM rfm_scores
+        recency_score + frequency_score + monetary_score                    as rfm_total_score,
+
+        case
+            when recency_score >= 4 and frequency_score >= 4 and monetary_score >= 4 then 'Champions'
+            when recency_score >= 3 and frequency_score >= 3                         then 'Loyal Customers'
+            when recency_score >= 4 and frequency_score <= 2                         then 'Promising'
+            when recency_score >= 3 and monetary_score  >= 3                         then 'Potential Loyalists'
+            when recency_score <= 2 and frequency_score >= 3                         then 'At Risk'
+            when recency_score <= 2 and monetary_score  >= 4                         then 'Cant Lose Them'
+            when recency_score <= 2                                                  then 'Hibernating'
+            else 'Others'
+        end                                                                 as rfm_segment
+
+    from rfm_scores
+
 ),
 
-final AS (
-    SELECT
+final as (
+
+    select
         c.customer_key,
+        c.customer_id,
         c.email,
         c.full_name,
         c.country_code,
         c.customer_segment,
         c.customer_status,
-        
-        -- Métriques RFM
+
+        -- RFM metrics
         r.last_order_date,
         r.days_since_last_order,
         r.total_orders,
@@ -88,23 +99,24 @@ final AS (
         r.lifetime_value,
         r.avg_order_value,
         r.first_order_date,
-        
-        -- Scores et segments
+
+        -- scores & segment
         r.recency_score,
         r.frequency_score,
         r.monetary_score,
         r.rfm_total_score,
         r.rfm_segment,
-        
-        -- Risque de churn
-        CASE
-            WHEN r.days_since_last_order > 180 THEN 'High'
-            WHEN r.days_since_last_order > 90 THEN 'Medium'
-            ELSE 'Low'
-        END AS churn_risk
-        
-    FROM dim_customers c
-    INNER JOIN rfm_segments r ON c.customer_key = r.customer_key
+
+        -- churn risk bucketing (30/90/180-day windows; see ADR notes)
+        case
+            when r.days_since_last_order > 180 then 'High'
+            when r.days_since_last_order > 90  then 'Medium'
+            else 'Low'
+        end                                                                 as churn_risk
+
+    from dim_customers c
+    inner join rfm_segments r on c.customer_key = r.customer_key
+
 )
 
-SELECT * FROM final
+select * from final

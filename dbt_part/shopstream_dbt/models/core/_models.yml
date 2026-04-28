@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: |
+      Customer dimension. One row per customer, keyed by a surrogate `customer_key`
+      (MD5 of the source `user_id`). Includes denormalized lifetime metrics for
+      convenience; full RFM analysis lives in mart_customer_ltv.
+    columns:
+      - name: customer_key
+        description: "Surrogate primary key (MD5)."
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Natural key from the source system. Preserved for traceability."
+        tests:
+          - unique
+          - not_null
+      - name: email
+        tests:
+          - unique
+          - not_null
+      - name: customer_segment
+        tests:
+          - accepted_values:
+              values: ['Premium', 'Freemium']
+      - name: customer_status
+        tests:
+          - accepted_values:
+              values: ['Active', 'At Risk', 'Churned', 'No Purchase']
+      - name: lifetime_value
+        tests:
+          - not_null
+
+  - name: dim_products
+    description: |
+      Product dimension. One row per product, keyed by a surrogate `product_key`.
+      Gross margin rate is sourced from the `product_margins` seed (see ADR-003).
+    columns:
+      - name: product_key
+        tests:
+          - unique
+          - not_null
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        tests:
+          - not_null
+      - name: gross_margin_rate
+        description: "Decimal in [0, 1]. Defaults to 0.20 if category not in seed."
+        tests:
+          - not_null
+
+  - name: fact_orders
+    description: |
+      Order line fact. Grain: one row per order line (order_id, product_id).
+      All FKs point to surrogate keys on the dimensions.
+    columns:
+      - name: order_line_key
+        description: "Surrogate primary key of the fact line."
+        tests:
+          - unique
+          - not_null
+      - name: customer_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: product_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
+      - name: line_revenue
+        tests:
+          - not_null
+      - name: is_completed
+        tests:
+          - accepted_values:
+              values: [0, 1]
+      - name: is_cancelled
+        tests:
+          - accepted_values:
+              values: [0, 1]

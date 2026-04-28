@@ -1,50 +1,59 @@
--- Vue d'ensemble des ventes
--- Fichier : models/marts/mart_sales_overview.sql
--- Agrégation par jour, pays, catégorie
+-- Mart: Sales Overview
+-- Layer: marts
+-- Grain: one row per (sale_date, country, product_category, customer_segment)
+-- Use case: top-of-funnel BI dashboard for daily revenue / order trends.
 
-{{
-    config(
-        materialized='table',
-        tags=['mart', 'sales']
-    )
-}}
+{{ config(
+    materialized='table',
+    tags=['mart', 'sales']
+) }}
 
-WITH fact_orders AS (
-    SELECT * FROM {{ ref('fact_orders') }}
+with fact_orders as (
+
+    select * from {{ ref('fact_orders') }}
+    where is_completed = 1
+
 ),
 
-dim_products AS (
-    SELECT * FROM {{ ref('dim_products') }}
+dim_products as (
+
+    select product_key, product_category from {{ ref('dim_products') }}
+
 ),
 
-dim_customers AS (
-    SELECT * FROM {{ ref('dim_customers') }}
+dim_customers as (
+
+    select customer_key, customer_segment from {{ ref('dim_customers') }}
+
 ),
 
-daily_sales AS (
-    SELECT
-        f.date_key AS sale_date,
+daily_sales as (
+
+    select
+        f.date_key                                              as sale_date,
         f.country_code,
         p.product_category,
         c.customer_segment,
-        
-        -- Métriques agrégées
-        COUNT(DISTINCT f.order_key) AS total_orders,
-        COUNT(DISTINCT f.customer_key) AS unique_customers,
-        SUM(f.quantity_sold) AS total_quantity,
-        SUM(f.line_revenue) AS total_revenue,
-        SUM(f.estimated_margin) AS total_margin,
-        AVG(f.order_total) AS avg_order_value,
-        
-        -- Ratios
-        SUM(f.line_revenue) / NULLIF(COUNT(DISTINCT f.order_key), 0) AS revenue_per_order,
-        SUM(f.estimated_margin) / NULLIF(SUM(f.line_revenue), 0) AS margin_rate
-        
-    FROM fact_orders f
-    INNER JOIN dim_products p ON f.product_key = p.product_key
-    INNER JOIN dim_customers c ON f.customer_key = c.customer_key
-    WHERE f.is_completed = 1
-    GROUP BY 1, 2, 3, 4
+
+        -- volume
+        count(distinct f.order_key)                             as total_orders,
+        count(distinct f.customer_key)                          as unique_customers,
+        sum(f.quantity_sold)                                    as total_quantity,
+
+        -- revenue and margin
+        sum(f.line_revenue)                                     as total_revenue,
+        sum(f.estimated_margin)                                 as total_margin,
+        avg(f.order_total)                                      as avg_order_value,
+
+        -- ratios
+        sum(f.line_revenue) / nullif(count(distinct f.order_key), 0) as revenue_per_order,
+        sum(f.estimated_margin) / nullif(sum(f.line_revenue), 0)     as margin_rate
+
+    from fact_orders f
+    inner join dim_products  p on f.product_key  = p.product_key
+    inner join dim_customers c on f.customer_key = c.customer_key
+    group by 1, 2, 3, 4
+
 )
 
-SELECT * FROM daily_sales
+select * from daily_sales
