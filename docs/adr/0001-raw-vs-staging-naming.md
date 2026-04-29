@@ -7,7 +7,7 @@
 
 ## Context
 
-In v1, the Snowflake schema that received CSV files from Azure Blob was called `STAGING`, and its tables were prefixed `STG_` (`STG_USERS`, `STG_ORDERS`, ...). The dbt staging models were also prefixed `stg_` (`stg_orders.sql`).
+In v1, the Snowflake schema that received CSV files from S3 was called `STAGING`, and its tables were prefixed `STG_` (`STG_USERS`, `STG_ORDERS`, ...). The dbt staging models were also prefixed `stg_` (`stg_orders.sql`).
 
 This created a conflict: the dbt `source('staging', 'stg_orders')` lookup pointed at a table named `stg_orders` while the dbt model was *also* called `stg_orders`. Two different artifacts shared one identifier across two layers. The downstream symptom was that `dim_customers`, `dim_products`, and `fact_orders` all reached past the staging models and read directly from `source(...)`, because the staging layer wasn't materially distinguishable from raw.
 

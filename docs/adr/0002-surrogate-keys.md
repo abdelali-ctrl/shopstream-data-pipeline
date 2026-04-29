@@ -39,7 +39,7 @@ Facts FK exclusively to surrogate keys. Marts join exclusively on surrogate keys
 
 **Positive**
 
-- Multi-source onboarding becomes a non-event: a new CRM lands its rows with its own natural key, and the surrogate key derived from `(source_system, natural_key)` keeps things unique.
+- Multi-source onboarding is straightforward to extend: when a second source arrives, `generate_surrogate_key` can be updated to include a source-system discriminator (e.g., `['source_system', 'user_id']`), making collisions between two systems with overlapping natural keys impossible. The current single-source implementation uses only the natural key; no changes to downstream models are required when the discriminator is added.
 - Type-change resilience: changing `user_id` from `INT` to `UUID` no longer cascades through every fact.
 - The signal value: this is the textbook Kimball pattern, and reviewers expect to see it in a senior-grade portfolio project.
 
@@ -57,11 +57,20 @@ Facts FK exclusively to surrogate keys. Marts join exclusively on surrogate keys
 
 ## Migration
 
-v2 implements this for all four dimension/fact models:
+v2 implements this for all four dimension/fact models using `dbt_utils.generate_surrogate_key`:
 
-- `dim_customers.customer_key` = `md5(user_id)`
-- `dim_products.product_key` = `md5(product_id)`
-- `fact_orders.order_line_key` = `md5(order_item_id)`
-- `fact_orders.order_key` = `md5(order_id)`
+| Model | Surrogate key | Input column |
+|---|---|---|
+| `dim_customers` | `customer_key` | `u.user_id` |
+| `dim_products` | `product_key` | `p.product_id` |
+| `fact_orders` | `order_line_key` | `oi.order_item_id` |
+| `fact_orders` | `order_key` | `o.order_id` |
 
-The natural keys remain on every dimension; existing queries that joined on `customer_id` continue to work as long as they're updated to read from the dimension and not directly from staging.
+Note: `generate_surrogate_key` is not a raw `md5()` call — it casts inputs to
+string and coalesces nulls before hashing, which makes keys stable even when
+a source column is nullable. This is why it is preferred over `md5(cast(... as varchar))`
+written manually.
+
+The natural keys remain on every dimension; existing queries that joined on
+`customer_id` continue to work as long as they are updated to read from the
+dimension and not directly from staging.
