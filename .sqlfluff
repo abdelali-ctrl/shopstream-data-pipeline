@@ -1,0 +1,44 @@
+[sqlfluff]
+# Snowflake dialect throughout the project.
+dialect = snowflake
+# Use the dbt templater so sqlfluff resolves {{ ref() }}, {{ config() }}, etc.
+# Without this, every Jinja block is a syntax error.
+templater = dbt
+# Prevent infinite loops in pathological Jinja (shouldn't happen here).
+runaway_limit = 10
+max_line_length = 120
+# Exclude target/ and dbt_packages/ — generated code, not ours.
+exclude_rules = None
+ignore_templated_areas = True
+
+[sqlfluff:templater:dbt]
+project_dir = ./dbt_part/shopstream_dbt
+profiles_dir = ./ci
+profile = shopstream_dbt
+target = ci
+
+[sqlfluff:indentation]
+tab_space_size = 4
+indent_unit = space
+
+# Keyword and identifier capitalisation rules.
+# SQL keywords UPPER, identifiers lower — matches the project's existing style.
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = upper
+
+# Allow trailing commas in SELECT lists (common dbt style).
+[sqlfluff:rules:convention.select_trailing_comma]
+select_clause_trailing_comma = require
+
+# Commas at end of line (not start) — matches existing models.
+[sqlfluff:rules:layout.commas]
+line_position = trailing

@@ -1,0 +1,127 @@
+# ShopStream CI
+#
+# Two jobs:
+#   1. lint   — ruff (Python) + sqlfluff (SQL).  No credentials needed.
+#               Runs on every PR and every push to main.
+#
+#   2. dbt-ci — dbt build against the SHOPSTREAM_CI database in Snowflake,
+#               isolated from production (SHOPSTREAM_DWH).
+#               Runs only after lint passes.
+#               Uses the ci/profiles.yml checked into the repo.
+#
+# Required GitHub secrets (Settings → Secrets and variables → Actions):
+#   SNOWFLAKE_ACCOUNT   e.g. xy12345.eu-west-1
+#   SNOWFLAKE_USER      CI service account user
+#   SNOWFLAKE_PASSWORD  CI service account password
+#
+# One-time Snowflake setup (run once in a worksheet):
+#   CREATE DATABASE IF NOT EXISTS SHOPSTREAM_CI;
+#   GRANT ALL ON DATABASE SHOPSTREAM_CI TO ROLE TRANSFORMER;
+#
+# The SHOPSTREAM_CI database uses the same schema names (STAGING/CORE/MARTS)
+# as production but is fully isolated — see ADR-005.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1: Static analysis (no Snowflake credentials required)
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff + sqlfluff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install lint tools
+        run: |
+          pip install \
+            ruff==0.4.4 \
+            sqlfluff==3.0.7 \
+            sqlfluff-templater-dbt==3.0.7 \
+            dbt-snowflake>=1.5.0
+
+      - name: ruff — Python linting
+        run: ruff check .
+
+      - name: sqlfluff — SQL linting
+        # Point at dbt project root so sqlfluff can resolve {{ ref() }} etc.
+        run: |
+          sqlfluff lint dbt_part/shopstream_dbt/models \
+            --dialect snowflake \
+            --templater dbt \
+            --config .sqlfluff
+
+  # -------------------------------------------------------------------------
+  # Job 2: dbt build against isolated CI database
+  # -------------------------------------------------------------------------
+  dbt-ci:
+    name: dbt build (SHOPSTREAM_CI)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    env:
+      SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dbt-snowflake
+        run: pip install dbt-snowflake>=1.5.0
+
+      - name: dbt deps
+        working-directory: dbt_part/shopstream_dbt
+        run: dbt deps --profiles-dir ../../ci
+
+      - name: dbt seed
+        working-directory: dbt_part/shopstream_dbt
+        run: dbt seed --profiles-dir ../../ci --target ci
+
+      - name: dbt build (fail-fast)
+        working-directory: dbt_part/shopstream_dbt
+        run: dbt build --profiles-dir ../../ci --target ci --fail-fast
+
+      # Always clean up CI tables so the next run starts fresh.
+      # Uses Snowflake connector directly — no dbt macro needed.
+      - name: Cleanup CI schemas
+        if: always()
+        env:
+          SNOWFLAKE_ACCOUNT:  ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER:     ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+        run: |
+          python - <<'EOF'
+          import os, snowflake.connector
+          conn = snowflake.connector.connect(
+              account=os.environ["SNOWFLAKE_ACCOUNT"],
+              user=os.environ["SNOWFLAKE_USER"],
+              password=os.environ["SNOWFLAKE_PASSWORD"],
+          )
+          cur = conn.cursor()
+          for schema in ("STAGING", "CORE", "MARTS"):
+              cur.execute(f"DROP SCHEMA IF EXISTS SHOPSTREAM_CI.{schema} CASCADE")
+              print(f"Dropped SHOPSTREAM_CI.{schema}")
+          cur.close()
+          conn.close()
+          EOF
