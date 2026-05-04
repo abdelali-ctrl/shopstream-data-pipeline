@@ -32,9 +32,7 @@ from dotenv import load_dotenv
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ],
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("ShopStream.ExportAzureBlob")
 
@@ -80,7 +78,9 @@ def open_blob_container():
         raise RuntimeError("AZURE_STORAGE_CONTAINER is not set")
 
     if AZURE_CONFIG["connection_string"]:
-        logger.info("Connecting to Azure Blob using connection string, container=%s", container_name)
+        logger.info(
+            "Connecting to Azure Blob using connection string, container=%s", container_name
+        )
         service = BlobServiceClient.from_connection_string(AZURE_CONFIG["connection_string"])
     else:
         account = AZURE_CONFIG["account"]
@@ -118,14 +118,18 @@ def export_table(
     buf = StringIO()
     df.to_csv(buf, index=False)
 
-    blob_name = f"raw/postgres/{table}/{partition_date}/{table}_{partition_date.replace('-', '')}.csv"
+    blob_name = (
+        f"raw/postgres/{table}/{partition_date}/{table}_{partition_date.replace('-', '')}.csv"
+    )
     container_client.upload_blob(
         name=blob_name,
         data=buf.getvalue(),
         overwrite=True,
         content_settings=ContentSettings(content_type="text/csv"),
     )
-    logger.info("Uploaded azure blob %s/%s (%d rows)", AZURE_CONFIG["container"], blob_name, len(df))
+    logger.info(
+        "Uploaded azure blob %s/%s (%d rows)", AZURE_CONFIG["container"], blob_name, len(df)
+    )
     return len(df)
 
 

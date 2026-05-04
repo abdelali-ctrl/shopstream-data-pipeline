@@ -37,9 +37,7 @@ from psycopg2.extras import execute_batch
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ],
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("ShopStream.GenerateData")
 
@@ -49,10 +47,10 @@ load_dotenv()
 # Config
 # ---------------------------------------------------------------------------
 DB_CONFIG = {
-    "host":     os.environ.get("POSTGRES_HOST", "localhost"),
-    "port":     int(os.environ.get("POSTGRES_PORT", 5432)),
+    "host": os.environ.get("POSTGRES_HOST", "localhost"),
+    "port": int(os.environ.get("POSTGRES_PORT", 5432)),
     "database": os.environ.get("POSTGRES_DB", "shopstream"),
-    "user":     os.environ.get("POSTGRES_USER", "postgres"),
+    "user": os.environ.get("POSTGRES_USER", "postgres"),
     "password": os.environ.get("POSTGRES_PASSWORD", ""),
 }
 
@@ -78,8 +76,14 @@ Faker.seed(42)
 # DB helpers
 # ---------------------------------------------------------------------------
 
+
 def connect() -> psycopg2.extensions.connection:
-    logger.info("Connecting to PostgreSQL at %s:%s/%s", DB_CONFIG["host"], DB_CONFIG["port"], DB_CONFIG["database"])
+    logger.info(
+        "Connecting to PostgreSQL at %s:%s/%s",
+        DB_CONFIG["host"],
+        DB_CONFIG["port"],
+        DB_CONFIG["database"],
+    )
     return psycopg2.connect(**DB_CONFIG)
 
 
@@ -95,20 +99,23 @@ def insert_many(conn: psycopg2.extensions.connection, sql: str, rows: Iterable[t
 # Generators
 # ---------------------------------------------------------------------------
 
+
 def generate_users(conn: psycopg2.extensions.connection) -> list[int]:
     logger.info("Generating %d users", USERS)
     rows = []
     for _ in range(USERS):
-        rows.append((
-            fake.unique.email(),
-            fake.first_name(),
-            fake.last_name(),
-            random.choice(COUNTRIES),
-            random.choices(PLAN_TYPES, weights=[0.7, 0.25, 0.05])[0],
-            fake.date_time_between(start_date="-2y", end_date="now"),
-            fake.date_time_between(start_date="-30d", end_date="now"),
-            random.random() > 0.05,  # 95% active
-        ))
+        rows.append(
+            (
+                fake.unique.email(),
+                fake.first_name(),
+                fake.last_name(),
+                random.choice(COUNTRIES),
+                random.choices(PLAN_TYPES, weights=[0.7, 0.25, 0.05])[0],
+                fake.date_time_between(start_date="-2y", end_date="now"),
+                fake.date_time_between(start_date="-30d", end_date="now"),
+                random.random() > 0.05,  # 95% active
+            )
+        )
     sql = """
         INSERT INTO users (email, first_name, last_name, country, plan_type, created_at, last_login, is_active)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -125,16 +132,18 @@ def generate_products(conn: psycopg2.extensions.connection) -> list[tuple[int, f
     rows = []
     for _ in range(PRODUCTS):
         price = round(random.uniform(5, 500), 2)
-        rows.append((
-            random.randint(1, 50),                        # merchant_id
-            fake.catch_phrase()[:255],                    # name
-            fake.text(max_nb_chars=200),                  # description
-            random.choice(CATEGORIES),                    # category
-            price,
-            random.randint(0, 1000),                      # stock_quantity
-            fake.date_time_between(start_date="-2y", end_date="-1y"),
-            fake.date_time_between(start_date="-1y", end_date="now"),
-        ))
+        rows.append(
+            (
+                random.randint(1, 50),  # merchant_id
+                fake.catch_phrase()[:255],  # name
+                fake.text(max_nb_chars=200),  # description
+                random.choice(CATEGORIES),  # category
+                price,
+                random.randint(0, 1000),  # stock_quantity
+                fake.date_time_between(start_date="-2y", end_date="-1y"),
+                fake.date_time_between(start_date="-1y", end_date="now"),
+            )
+        )
     sql = """
         INSERT INTO products (merchant_id, name, description, category, price, stock_quantity, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -169,17 +178,19 @@ def generate_orders_and_items(
             items.append((product_id, qty, price, line_total))
             order_total += line_total
 
-        order_rows.append((
-            random.choice(user_ids),
-            fake.date_time_between(start_date="-1y", end_date="now"),
-            round(order_total, 2),
-            random.choices(
-                ORDER_STATUSES,
-                weights=[0.05, 0.20, 0.20, 0.45, 0.05, 0.05],
-            )[0],
-            random.choice(COUNTRIES),
-            random.choice(PAYMENT_METHODS),
-        ))
+        order_rows.append(
+            (
+                random.choice(user_ids),
+                fake.date_time_between(start_date="-1y", end_date="now"),
+                round(order_total, 2),
+                random.choices(
+                    ORDER_STATUSES,
+                    weights=[0.05, 0.20, 0.20, 0.45, 0.05, 0.05],
+                )[0],
+                random.choice(COUNTRIES),
+                random.choice(PAYMENT_METHODS),
+            )
+        )
         item_rows_by_order[i] = items  # index keyed for now
 
     # Insert orders, get back ids in insertion order.
@@ -212,6 +223,7 @@ def generate_orders_and_items(
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     started = datetime.now()

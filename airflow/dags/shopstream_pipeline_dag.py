@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 # Slack helpers
 # ---------------------------------------------------------------------------
 
+
 def _post_slack(text: str) -> None:
     """
     Post a message to the Slack webhook.
@@ -87,6 +88,7 @@ def _post_slack(text: str) -> None:
 # ---------------------------------------------------------------------------
 # Callbacks
 # ---------------------------------------------------------------------------
+
 
 def notify_failure(context: dict[str, Any]) -> None:
     """
@@ -145,7 +147,10 @@ dag = DAG(
 # Task functions
 # ---------------------------------------------------------------------------
 
-def _run(cmd: list[str], cwd: Path | None = None, env_updates: dict[str, str] | None = None) -> None:
+
+def _run(
+    cmd: list[str], cwd: Path | None = None, env_updates: dict[str, str] | None = None
+) -> None:
     """Run a subprocess and raise on non-zero exit, surfacing stdout / stderr."""
     env = os.environ.copy()
     if env_updates:
@@ -197,9 +202,7 @@ def verify_snowflake_data(**_: Any) -> list[tuple[str, int]]:
     try:
         import snowflake.connector  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RuntimeError(
-            "snowflake-connector-python is required in the Airflow image."
-        ) from exc
+        raise RuntimeError("snowflake-connector-python is required in the Airflow image.") from exc
 
     conn = snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -210,13 +213,13 @@ def verify_snowflake_data(**_: Any) -> list[tuple[str, int]]:
     )
 
     targets = [
-        ("RAW.RAW_USERS",                  "select count(*) from RAW.RAW_USERS"),
-        ("RAW.RAW_ORDERS",                 "select count(*) from RAW.RAW_ORDERS"),
-        ("STAGING.STG_ORDERS",             "select count(*) from STAGING.STG_ORDERS"),
-        ("CORE.DIM_CUSTOMERS",             "select count(*) from CORE.DIM_CUSTOMERS"),
-        ("CORE.FACT_ORDERS",               "select count(*) from CORE.FACT_ORDERS"),
-        ("MARTS.MART_SALES_OVERVIEW",      "select count(*) from MARTS.MART_SALES_OVERVIEW"),
-        ("MARTS.MART_CUSTOMER_LTV",        "select count(*) from MARTS.MART_CUSTOMER_LTV"),
+        ("RAW.RAW_USERS", "select count(*) from RAW.RAW_USERS"),
+        ("RAW.RAW_ORDERS", "select count(*) from RAW.RAW_ORDERS"),
+        ("STAGING.STG_ORDERS", "select count(*) from STAGING.STG_ORDERS"),
+        ("CORE.DIM_CUSTOMERS", "select count(*) from CORE.DIM_CUSTOMERS"),
+        ("CORE.FACT_ORDERS", "select count(*) from CORE.FACT_ORDERS"),
+        ("MARTS.MART_SALES_OVERVIEW", "select count(*) from MARTS.MART_SALES_OVERVIEW"),
+        ("MARTS.MART_CUSTOMER_LTV", "select count(*) from MARTS.MART_CUSTOMER_LTV"),
         ("MARTS.MART_PRODUCT_PERFORMANCE", "select count(*) from MARTS.MART_PRODUCT_PERFORMANCE"),
     ]
 

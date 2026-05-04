@@ -58,7 +58,9 @@ def main() -> None:
         schema="RAW",
     )
 
-    logger.info("Executing %d Snowflake statements for partition=%s", len(statements), partition_date)
+    logger.info(
+        "Executing %d Snowflake statements for partition=%s", len(statements), partition_date
+    )
     try:
         cursor = conn.cursor()
         try:
