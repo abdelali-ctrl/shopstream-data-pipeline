@@ -31,8 +31,8 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from airflow import DAG
 
+from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
