@@ -53,11 +53,15 @@ models:
         description: "Decimal in [0, 1]. Defaults to 0.20 if category not in seed."
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1
 
   - name: fact_orders
     description: |
       Order line fact. Grain: one row per order line (order_id, product_id).
       All FKs point to surrogate keys on the dimensions.
+      Materialized as incremental (merge on order_line_key) — see ADR-006.
     columns:
       - name: order_line_key
         description: "Surrogate primary key of the fact line."
@@ -79,6 +83,19 @@ models:
       - name: line_revenue
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              strictly: true
+      - name: quantity_sold
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+      - name: estimated_margin
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
       - name: is_completed
         tests:
           - accepted_values:
