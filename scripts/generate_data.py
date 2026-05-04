@@ -23,9 +23,8 @@ from __future__ import annotations
 import logging
 import os
 import random
-import sys
-from datetime import datetime, timedelta
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import datetime
 
 import psycopg2
 from dotenv import load_dotenv

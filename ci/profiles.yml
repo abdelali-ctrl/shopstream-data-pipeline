@@ -1,0 +1,37 @@
+# ci/profiles.yml
+#
+# This file is checked into the repo and used exclusively by GitHub Actions.
+# It reads all credentials from environment variables — nothing is hardcoded.
+#
+# The "ci" target points at SHOPSTREAM_CI, a dedicated database that is
+# fully isolated from the production SHOPSTREAM_DWH.  See ADR-005.
+#
+# The generate_schema_name macro overrides the default dbt behaviour, so
+# models land in STAGING / CORE / MARTS regardless of target.schema.
+# Isolation is achieved at the DATABASE level, not the schema level.
+#
+# To run locally with this profile:
+#   export SNOWFLAKE_ACCOUNT=...
+#   export SNOWFLAKE_USER=...
+#   export SNOWFLAKE_PASSWORD=...
+#   dbt build --profiles-dir ./ci --target ci
+
+shopstream_dbt:
+  outputs:
+    ci:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: TRANSFORMER
+      # Dedicated CI database — isolated from SHOPSTREAM_DWH.
+      # Create once: CREATE DATABASE IF NOT EXISTS SHOPSTREAM_CI;
+      database: SHOPSTREAM_CI
+      warehouse: TRANSFORM_WH
+      # target.schema is the fallback in generate_schema_name when
+      # custom_schema_name is None.  Set to a neutral default.
+      schema: PUBLIC
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: "shopstream_ci"
+  target: ci

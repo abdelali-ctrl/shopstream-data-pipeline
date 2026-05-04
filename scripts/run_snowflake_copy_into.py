@@ -9,8 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import snowflake.connector
@@ -42,7 +41,7 @@ def split_sql_statements(sql: str) -> list[str]:
 
 
 def main() -> None:
-    partition_date = os.environ.get("EXECUTION_DATE") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    partition_date = os.environ.get("EXECUTION_DATE") or datetime.now(UTC).strftime("%Y-%m-%d")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", partition_date):
         raise RuntimeError(f"Invalid EXECUTION_DATE: {partition_date}. Expected YYYY-MM-DD.")
 
