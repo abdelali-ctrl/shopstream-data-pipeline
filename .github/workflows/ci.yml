@@ -57,6 +57,11 @@ jobs:
       - name: ruff — Python linting
         run: ruff check .
 
+      - name: dbt deps (for sqlfluff templater)
+        working-directory: dbt_part/shopstream_dbt
+        run: dbt deps --profiles-dir ../../ci
+
+        
       - name: sqlfluff — SQL linting
         # Point at dbt project root so sqlfluff can resolve {{ ref() }} etc.
         run: |
