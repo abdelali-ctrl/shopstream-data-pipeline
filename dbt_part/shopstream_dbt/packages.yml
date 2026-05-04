@@ -5,5 +5,5 @@ packages:
 
   # Richer test library: value ranges, row counts, column statistics.
   # Used on fact_orders and mart measures to catch numeric drift.
-  - package: calogica/dbt_expectations
+  - package: metaplane/dbt_expectations
     version: 0.10.3

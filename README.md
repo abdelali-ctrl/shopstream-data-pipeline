@@ -205,11 +205,14 @@ shopstream/
 
 ## Architecture decisions
 
-Non-obvious choices are recorded in [`docs/adr/`](./docs/adr/). The first three explain the v2 layout:
+Non-obvious choices are recorded in [`docs/adr/`](./docs/adr/). 
 
 - [ADR-001](./docs/adr/0001-raw-vs-staging-naming.md) — Raw vs. staging: naming and schema separation
 - [ADR-002](./docs/adr/0002-surrogate-keys.md) — Surrogate keys on dimensions and facts
 - [ADR-003](./docs/adr/0003-margin-via-seed.md) — Margin estimation via a versioned seed file
+- [ADR-004](./docs/adr/0004-azure-blob-instead-of-s3.md) — Azure Blob Storage instead of AWS S3 for the data lake layer
+- [ADR-005](./docs/adr/0005-github-actions-ci.md) — GitHub Actions CI pipeline
+- [ADR-006](./docs/adr/0006-incremental-fact-orders.md) — Incremental materialization for fact_orders
 
 ---
 
