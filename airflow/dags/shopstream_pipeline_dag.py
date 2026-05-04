@@ -29,14 +29,14 @@ v2.1 changes vs v2.0:
 """
 
 from __future__ import annotations
- 
-from datetime import datetime, timedelta
+
 import logging
 import os
-from pathlib import Path
 import subprocess
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
- 
+
 import requests
 from airflow import DAG
 from airflow.operators.bash import BashOperator
