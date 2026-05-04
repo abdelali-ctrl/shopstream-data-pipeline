@@ -25,7 +25,7 @@ logger = logging.getLogger("ShopStream.SnowflakeCopyInto")
 load_dotenv()
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SQL_FILE = SCRIPT_DIR / "snowflake_copy_into_azure.sql"
+SQL_FILE = SCRIPT_DIR / "snowflake_copy_into.sql"
 
 
 def split_sql_statements(sql: str) -> list[str]:
