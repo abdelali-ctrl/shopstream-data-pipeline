@@ -92,10 +92,18 @@ jobs:
         run: dbt deps --profiles-dir ../../ci
 
       - name: dbt seed
+        env:
+          SNOWFLAKE_ACCOUNT:  ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER:     ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         working-directory: dbt_part/shopstream_dbt
         run: dbt seed --profiles-dir ../../ci --target ci
 
       - name: dbt build (fail-fast)
+        env:
+          SNOWFLAKE_ACCOUNT:  ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER:     ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         working-directory: dbt_part/shopstream_dbt
         run: dbt build --profiles-dir ../../ci --target ci --fail-fast
 
