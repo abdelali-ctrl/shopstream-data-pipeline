@@ -1,11 +1,15 @@
 -- Fact: Order Lines
 -- Layer: core
 -- Grain: one row per (order, product) line item
+-- Materialization: incremental (append new + update changed lines by order_line_key)
 -- Surrogate key strategy: see ADR-002.
 -- Margin: derived from dim_products.gross_margin_rate (see ADR-003).
+-- Incremental strategy: see ADR-006 (incremental vs. table for fact_orders).
 
 {{ config(
-    materialized='table',
+    materialized='incremental',
+    unique_key='order_line_key',
+    on_schema_change='fail',
     tags=['core', 'fact']
 ) }}
 
@@ -81,7 +85,16 @@ final as (
     inner join orders        o on oi.order_id    = o.order_id
     inner join dim_customers c on o.customer_id  = c.customer_id
     inner join dim_products  p on oi.product_id  = p.product_id
+
+    -- Incremental filter: on subsequent runs, only process orders that
+    -- arrived after the latest order_timestamp already in the table.
+    -- On the initial run (full refresh), this block is skipped and all
+    -- historical rows are loaded from start_date onward.
+    {% if is_incremental() %}
+    where o.order_at > (select max(order_timestamp) from {{ this }})
+    {% else %}
     where o.order_at >= '{{ var("start_date") }}'
+    {% endif %}
 
 )
 

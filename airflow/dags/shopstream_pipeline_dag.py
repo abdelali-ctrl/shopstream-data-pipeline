@@ -6,11 +6,12 @@ Daily orchestration for ShopStream:
     2. Load Azure Blob -> Snowflake RAW (COPY INTO, run by an external operator below)
     3. Build dbt: staging -> core -> marts, with tests inline (`dbt build`)
     4. Smoke-test the warehouse
-    5. Notify on success / failure
+    5. Notify on success / failure via Slack
 
 Conventions:
     - Tasks fail loudly (no swallowed errors). Slack alerting is wired via
-      `on_failure_callback` once the webhook is configured (see TODO).
+      `on_failure_callback`.  Set SLACK_WEBHOOK_URL in Airflow Variables or
+      the container environment to activate.
     - dbt is invoked with `dbt build` so models and their tests run in
       dependency order, and a single test failure stops the pipeline.
     - SLA: 90 minutes end-to-end at the demo data volume.
@@ -20,7 +21,11 @@ v2 changes vs v1:
       two tasks, with test failures silently swallowed).
     - Schema names fixed (CORE_marts -> MARTS, etc.).
     - All comments and log messages in English.
-    - SLAs added per task; Slack callback hook wired (placeholder).
+    - SLAs added per task; Slack callback now implemented (was placeholder).
+
+v2.1 changes vs v2.0:
+    - Slack webhook implemented in notify_failure and send_success_notification.
+      Set SLACK_WEBHOOK_URL environment variable to activate.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import requests
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
@@ -49,18 +55,51 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Slack helpers
+# ---------------------------------------------------------------------------
+
+def _post_slack(text: str) -> None:
+    """
+    Post a message to the Slack webhook.
+
+    If SLACK_WEBHOOK_URL is not set, logs a warning and returns — the DAG
+    continues normally.  This makes Slack optional without code changes.
+    """
+    webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        logger.warning(
+            "SLACK_WEBHOOK_URL is not set; skipping Slack notification. "
+            "Add it to Airflow Variables or the container environment."
+        )
+        return
+
+    payload = {"text": text}
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        response.raise_for_status()
+        logger.info("Slack notification sent.")
+    except requests.RequestException as exc:
+        # Log but do not re-raise: a Slack failure should not fail the DAG.
+        logger.error("Failed to send Slack notification: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Callbacks
 # ---------------------------------------------------------------------------
 
 def notify_failure(context: dict[str, Any]) -> None:
     """
-    Failure callback. Logs the failure and (TODO) posts to Slack.
-
-    Wire SLACK_WEBHOOK_URL via Airflow Variables / env, then replace the
-    log line below with a `requests.post(SLACK_WEBHOOK_URL, json=payload)`
-    call. Kept as a no-op for v2.0 so the DAG runs without external deps.
+    Failure callback — fires on any task failure in the DAG.
+    Posts a structured alert to Slack with direct link to the failing task log.
     """
     task = context["task_instance"]
+    text = (
+        f":red_circle: *ShopStream pipeline failed*\n"
+        f"• DAG: `{task.dag_id}`\n"
+        f"• Task: `{task.task_id}`\n"
+        f"• Date: `{context.get('ds')}`\n"
+        f"• <{task.log_url}|View task log>"
+    )
     logger.error(
         "Pipeline failure: dag=%s task=%s execution_date=%s log_url=%s",
         task.dag_id,
@@ -68,7 +107,7 @@ def notify_failure(context: dict[str, Any]) -> None:
         context.get("ds"),
         task.log_url,
     )
-    # TODO(v2.1): Slack webhook integration.
+    _post_slack(text)
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +244,14 @@ def verify_snowflake_data(**_: Any) -> list[tuple[str, int]]:
 
 
 def send_success_notification(**context: Any) -> None:
-    """Success callback. TODO(v2.1): Slack webhook."""
+    """Post a success message to Slack."""
+    text = (
+        f":large_green_circle: *ShopStream pipeline succeeded*\n"
+        f"• DAG: `shopstream_daily_pipeline`\n"
+        f"• Date: `{context['ds']}`"
+    )
     logger.info("Pipeline completed successfully for %s", context["ds"])
+    _post_slack(text)
 
 
 # ---------------------------------------------------------------------------

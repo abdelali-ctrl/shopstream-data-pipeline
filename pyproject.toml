@@ -1,0 +1,14 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# E/W: pycodestyle,  F: pyflakes,  I: isort,  UP: pyupgrade
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",   # line-length — enforced by ruff format, not lint
+]
+
+[tool.ruff.lint.per-file-ignores]
+# print() is fine in standalone scripts.
+"scripts/*.py" = ["T201"]

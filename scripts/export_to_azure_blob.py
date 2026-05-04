@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import StringIO
 
 import pandas as pd
@@ -131,7 +130,7 @@ def export_table(
 
 
 def main() -> None:
-    partition_date = os.environ.get("EXECUTION_DATE") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    partition_date = os.environ.get("EXECUTION_DATE") or datetime.now(UTC).strftime("%Y-%m-%d")
     logger.info("=== Export PostgreSQL -> Azure Blob, partition=%s ===", partition_date)
 
     pg = open_pg()
