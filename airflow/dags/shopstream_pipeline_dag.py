@@ -38,11 +38,10 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-
-from airflow import DAG
 
 # ---------------------------------------------------------------------------
 # Paths and config
