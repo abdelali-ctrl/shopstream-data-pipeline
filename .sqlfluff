@@ -32,4 +32,4 @@ capitalisation_policy = lower
 capitalisation_policy = lower
 
 [sqlfluff:rules:capitalisation.literals]
-capitalisation_policy = upper
+capitalisation_policy = lower
