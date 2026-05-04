@@ -20,9 +20,9 @@ shopstream_dbt:
   outputs:
     ci:
       type: snowflake
-      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'lint_dummy') }}"
-      user: "{{ env_var('SNOWFLAKE_USER', 'lint_dummy') }}"
-      password: "{{ env_var('SNOWFLAKE_PASSWORD', 'lint_dummy') }}"
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
       role: TRANSFORMER
       # Dedicated CI database — isolated from SHOPSTREAM_DWH.
       # Create once: CREATE DATABASE IF NOT EXISTS SHOPSTREAM_CI;

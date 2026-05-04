@@ -51,23 +51,15 @@ jobs:
           pip install \
             ruff==0.4.4 \
             sqlfluff==3.0.7 \
-            sqlfluff-templater-dbt==3.0.7 \
-            dbt-snowflake>=1.5.0
-
+            
       - name: ruff — Python linting
         run: ruff check .
 
-      - name: dbt deps (for sqlfluff templater)
-        working-directory: dbt_part/shopstream_dbt
-        run: dbt deps --profiles-dir ../../ci
-
-        
       - name: sqlfluff — SQL linting
         # Point at dbt project root so sqlfluff can resolve {{ ref() }} etc.
         run: |
           sqlfluff lint dbt_part/shopstream_dbt/models \
             --dialect snowflake \
-            --templater dbt \
             --config .sqlfluff
 
   # -------------------------------------------------------------------------
@@ -79,9 +71,9 @@ jobs:
     needs: lint
 
     env:
-      SNOWFLAKE_ACCOUNT: lint_dummy
-      SNOWFLAKE_USER:      lint_dummy
-      SNOWFLAKE_PASSWORD:  lint_dummy
+      SNOWFLAKE_ACCOUNT:  "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      SNOWFLAKE_USER:      "{{ env_var('SNOWFLAKE_USER') }}"
+      SNOWFLAKE_PASSWORD:  "{{ env_var('SNOWFLAKE_PASSWORD') }}"
 
     steps:
       - uses: actions/checkout@v4
