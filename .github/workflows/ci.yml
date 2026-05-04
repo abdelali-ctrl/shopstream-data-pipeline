@@ -74,9 +74,9 @@ jobs:
     needs: lint
 
     env:
-      SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_ACCOUNT: lint_dummy
+      SNOWFLAKE_USER:      lint_dummy
+      SNOWFLAKE_PASSWORD:  lint_dummy
 
     steps:
       - uses: actions/checkout@v4
